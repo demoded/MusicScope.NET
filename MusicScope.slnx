@@ -1,0 +1,12 @@
+<Solution>
+  <Folder Name="/src/">
+    <Project Path="src/MusicScope.Audio/MusicScope.Audio.csproj" />
+    <Project Path="src/MusicScope.Core/MusicScope.Core.csproj" />
+    <Project Path="src/MusicScope.Desktop/MusicScope.Desktop.csproj" />
+    <Project Path="src/MusicScope.Network/MusicScope.Network.csproj" />
+    <Project Path="src/MusicScope.Reporting/MusicScope.Reporting.csproj" />
+  </Folder>
+  <Folder Name="/tests/">
+    <Project Path="tests/MusicScope.Core.Tests/MusicScope.Core.Tests.csproj" />
+  </Folder>
+</Solution>

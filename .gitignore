@@ -1,0 +1,22 @@
+# .NET build artifacts
+**/bin/
+**/obj/
+**/publish/
+
+# Tools & Decompiled cache
+tools/*.jar
+tools/MusicScope-extracted.jar
+tools/src-decompiled/raw-exe/
+tools/src-decompiled/raw-mscv/
+publish/
+
+# Bundled legacy JRE
+OriginalJavaApp/jre/
+
+# User-specific files
+*.user
+*.userosscache
+*.suo
+.vs/
+.idea/
+.vscode/

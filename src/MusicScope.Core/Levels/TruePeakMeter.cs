@@ -1,0 +1,233 @@
+using System;
+
+namespace MusicScope.Core.Levels;
+
+/// <summary>
+/// ITU-R BS.1770-4 compliant 4x oversampling True Peak Meter.
+/// Detects inter-sample peaks that exceed 0 dBFS through polyphase FIR interpolation.
+/// </summary>
+public sealed class TruePeakMeter
+{
+    private const int OversamplingFactor = 4;
+    private const int SubfilterLength = 16; // 64-tap total FIR filter / 4 phases = 16 taps per phase
+
+    // Precomputed 4x polyphase interpolation coefficients (windowed-sinc)
+    private static readonly double[][] PolyphaseCoefficients = InitializeCoefficients();
+
+    private static double[][] InitializeCoefficients()
+    {
+        int totalTaps = OversamplingFactor * SubfilterLength;
+        double cutoff = 0.125; // 1 / (2 * OversamplingFactor)
+        double center = (totalTaps - 1) / 2.0;
+
+        double[][] poly = new double[OversamplingFactor][];
+        for (int p = 0; p < OversamplingFactor; p++)
+        {
+            poly[p] = new double[SubfilterLength];
+            for (int k = 0; k < SubfilterLength; k++)
+            {
+                int n = k * OversamplingFactor + p;
+                double t = n - center;
+                double sinc = (Math.Abs(t) < 1e-9)
+                    ? 2.0 * cutoff
+                    : Math.Sin(2.0 * Math.PI * cutoff * t) / (Math.PI * t);
+
+                // Blackman window
+                double a = 2.0 * Math.PI * n / (totalTaps - 1);
+                double w = 0.42 - 0.5 * Math.Cos(a) + 0.08 * Math.Cos(2.0 * a);
+                poly[p][k] = sinc * w * OversamplingFactor;
+            }
+
+            // Normalize branch for unity DC gain
+            double sum = 0.0;
+            for (int k = 0; k < SubfilterLength; k++)
+                sum += poly[p][k];
+
+            if (Math.Abs(sum) > 1e-9)
+            {
+                for (int k = 0; k < SubfilterLength; k++)
+                    poly[p][k] /= sum;
+            }
+        }
+
+        return poly;
+    }
+
+    private readonly int _channelCount;
+    // Circular sample delay history buffer per channel: [channel][SubfilterLength]
+    private readonly double[][] _history;
+    private readonly int[] _historyIndex;
+
+    private readonly double[] _samplePeakMax;
+    private readonly double[] _truePeakMax;
+    private readonly double[] _sumSquares;
+    private long _totalFrames;
+
+    public TruePeakMeter(int channelCount = 2)
+    {
+        if (channelCount <= 0)
+            throw new ArgumentOutOfRangeException(nameof(channelCount));
+
+        _channelCount = channelCount;
+        _history = new double[channelCount][];
+        _historyIndex = new int[channelCount];
+        _samplePeakMax = new double[channelCount];
+        _truePeakMax = new double[channelCount];
+        _sumSquares = new double[channelCount];
+
+        for (int ch = 0; ch < channelCount; ch++)
+        {
+            _history[ch] = new double[SubfilterLength];
+        }
+
+        Reset();
+    }
+
+    /// <summary>
+    /// Processes interleaved samples and updates Sample Peak and True Peak.
+    /// </summary>
+    public void ProcessInterleaved(ReadOnlySpan<double> samples)
+    {
+        int frameCount = samples.Length / _channelCount;
+        for (int frame = 0; frame < frameCount; frame++)
+        {
+            int baseIdx = frame * _channelCount;
+            for (int ch = 0; ch < _channelCount; ch++)
+            {
+                double s = samples[baseIdx + ch];
+                double absS = Math.Abs(s);
+
+                // Update sample peak
+                if (absS > _samplePeakMax[ch])
+                    _samplePeakMax[ch] = absS;
+
+                // RMS accumulator
+                _sumSquares[ch] += s * s;
+
+                // Insert into circular history buffer
+                int writeIdx = _historyIndex[ch];
+                _history[ch][writeIdx] = s;
+                _historyIndex[ch] = (writeIdx + 1) % SubfilterLength;
+
+                // Compute 4 polyphase interpolated points
+                for (int phase = 0; phase < OversamplingFactor; phase++)
+                {
+                    double[] coeffs = PolyphaseCoefficients[phase];
+                    double interpolated = 0.0;
+                    int readIdx = writeIdx; // starts from newest sample
+
+                    for (int tap = 0; tap < SubfilterLength; tap++)
+                    {
+                        interpolated += coeffs[tap] * _history[ch][readIdx];
+                        readIdx = (readIdx - 1 + SubfilterLength) % SubfilterLength;
+                    }
+
+                    double absInterp = Math.Abs(interpolated);
+                    if (absInterp > _truePeakMax[ch])
+                    {
+                        _truePeakMax[ch] = absInterp;
+                    }
+                }
+            }
+            _totalFrames++;
+        }
+    }
+
+    /// <summary>
+    /// Processes interleaved float samples.
+    /// </summary>
+    public void ProcessInterleaved(ReadOnlySpan<float> samples)
+    {
+        int frameCount = samples.Length / _channelCount;
+        for (int frame = 0; frame < frameCount; frame++)
+        {
+            int baseIdx = frame * _channelCount;
+            for (int ch = 0; ch < _channelCount; ch++)
+            {
+                double s = samples[baseIdx + ch];
+                double absS = Math.Abs(s);
+
+                if (absS > _samplePeakMax[ch])
+                    _samplePeakMax[ch] = absS;
+
+                _sumSquares[ch] += s * s;
+
+                int writeIdx = _historyIndex[ch];
+                _history[ch][writeIdx] = s;
+                _historyIndex[ch] = (writeIdx + 1) % SubfilterLength;
+
+                for (int phase = 0; phase < OversamplingFactor; phase++)
+                {
+                    double[] coeffs = PolyphaseCoefficients[phase];
+                    double interpolated = 0.0;
+                    int readIdx = writeIdx;
+
+                    for (int tap = 0; tap < SubfilterLength; tap++)
+                    {
+                        interpolated += coeffs[tap] * _history[ch][readIdx];
+                        readIdx = (readIdx - 1 + SubfilterLength) % SubfilterLength;
+                    }
+
+                    double absInterp = Math.Abs(interpolated);
+                    if (absInterp > _truePeakMax[ch])
+                    {
+                        _truePeakMax[ch] = absInterp;
+                    }
+                }
+            }
+            _totalFrames++;
+        }
+    }
+
+    /// <summary>
+    /// Returns the current peak and RMS results.
+    /// </summary>
+    public LevelsResult CalculateResult()
+    {
+        double spLeftDb = _samplePeakMax[0] > 1e-6 ? 20.0 * Math.Log10(_samplePeakMax[0]) : -100.0;
+        double spRightDb = _channelCount > 1 && _samplePeakMax[1] > 1e-6 ? 20.0 * Math.Log10(_samplePeakMax[1]) : spLeftDb;
+
+        double tpLeftDb = _truePeakMax[0] > 1e-6 ? 20.0 * Math.Log10(_truePeakMax[0]) : -100.0;
+        double tpRightDb = _channelCount > 1 && _truePeakMax[1] > 1e-6 ? 20.0 * Math.Log10(_truePeakMax[1]) : tpLeftDb;
+
+        double rmsLeft = _totalFrames > 0 ? Math.Sqrt(_sumSquares[0] / _totalFrames) : 0.0;
+        double rmsRight = _channelCount > 1 && _totalFrames > 0 ? Math.Sqrt(_sumSquares[1] / _totalFrames) : rmsLeft;
+
+        double rmsLeftDb = rmsLeft > 1e-6 ? 20.0 * Math.Log10(rmsLeft) : -100.0;
+        double rmsRightDb = rmsRight > 1e-6 ? 20.0 * Math.Log10(rmsRight) : -100.0;
+
+        double maxPeak = Math.Max(_samplePeakMax[0], _channelCount > 1 ? _samplePeakMax[1] : 0.0);
+        double avgRms = (rmsLeft + rmsRight) / 2.0;
+        double crestDb = (maxPeak > 1e-6 && avgRms > 1e-6) ? 20.0 * Math.Log10(maxPeak / avgRms) : 0.0;
+
+        double drDb = Math.Max(0.0, Math.Round(crestDb, 1));
+
+        return new LevelsResult
+        {
+            SamplePeakLeftDb = Math.Round(spLeftDb, 2),
+            SamplePeakRightDb = Math.Round(spRightDb, 2),
+            TruePeakLeftDb = Math.Round(tpLeftDb, 2),
+            TruePeakRightDb = Math.Round(tpRightDb, 2),
+            RmsLeftDb = Math.Round(rmsLeftDb, 2),
+            RmsRightDb = Math.Round(rmsRightDb, 2),
+            CrestFactorDb = Math.Round(crestDb, 1),
+            DynamicRangeDb = drDb
+        };
+    }
+
+    /// <summary>
+    /// Resets the meter state.
+    /// </summary>
+    public void Reset()
+    {
+        for (int ch = 0; ch < _channelCount; ch++)
+        {
+            Array.Clear(_history[ch], 0, SubfilterLength);
+            _historyIndex[ch] = 0;
+            _samplePeakMax[ch] = 0.0;
+            _truePeakMax[ch] = 0.0;
+            _sumSquares[ch] = 0.0;
+        }
+        _totalFrames = 0;
+    }
+}
