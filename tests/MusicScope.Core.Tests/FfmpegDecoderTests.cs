@@ -12,11 +12,14 @@ public class FfmpegDecoderTests
     [Fact]
     public async Task FfmpegDecoder_Decodes_Wav_File_And_Analyzes()
     {
-        string wavPath = Path.GetFullPath(Path.Combine(AppContext.BaseDirectory, "..", "..", "..", "..", "..", "test_sine.wav"));
-        if (!File.Exists(wavPath))
-        {
-            wavPath = Path.GetFullPath(Path.Combine(Directory.GetCurrentDirectory(), "test_sine.wav"));
-        }
+        string[] candidatePaths =
+        [
+            Path.GetFullPath(Path.Combine(AppContext.BaseDirectory, "..", "..", "..", "..", "test_sine.wav")),
+            Path.GetFullPath(Path.Combine(AppContext.BaseDirectory, "..", "..", "..", "..", "..", "tests", "test_sine.wav")),
+            Path.GetFullPath(Path.Combine(Directory.GetCurrentDirectory(), "tests", "test_sine.wav")),
+            Path.GetFullPath(Path.Combine(Directory.GetCurrentDirectory(), "test_sine.wav"))
+        ];
+        string wavPath = Array.Find(candidatePaths, File.Exists) ?? candidatePaths[0];
         Assert.True(File.Exists(wavPath), $"Test WAV file does not exist at {wavPath}");
 
         var decoder = new FfmpegAudioDecoder();
