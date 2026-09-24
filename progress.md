@@ -140,3 +140,14 @@ This document records the step-by-step progress of reverse engineering the legac
   * [x] Windows: `publish/win-x64/`
   * [x] macOS: `publish/osx-arm64/` (Apple Silicon M1-M4)
   * [x] Linux: `publish/linux-x64/`
+
+---
+
+### Phase 8: Real-Time Live Playback & Analysis Visualization
+* **Status**: [COMPLETED]
+* **Key Enhancements**:
+  * [x] `AudioRealtimeSnapshot.cs` (`MusicScope.Core`): High-throughput immutable snapshot model carrying momentary loudness, instantaneous sample/true peaks per channel, FFT power spectrum bins, phase correlation, and goniometer X/Y phosphor points.
+  * [x] `AudioAnalysisEngine.cs` (`MusicScope.Core`): Enhanced chunk processing loop with `IProgress<AudioRealtimeSnapshot>` support and `GetRealtimeSnapshot()` query mechanism to stream intermediate DSP states without blocking calculation threads.
+  * [x] `MainViewModel.cs` (`MusicScope.Desktop`): High-frequency throttling (~40 FPS / 25 ms) using `Stopwatch` to push real-time audio metrics to the Avalonia UI dispatcher, providing smooth visual animation during file decoding and DAW streaming.
+  * [x] `MainWindow.axaml` (`MusicScope.Desktop`): Wired `GoniometerControl` `PointsX` and `PointsY` data bindings; all charts, meters, and numerical counters display instantaneous metrics dynamically during decoding, settling into exact cumulative values upon completion.
+

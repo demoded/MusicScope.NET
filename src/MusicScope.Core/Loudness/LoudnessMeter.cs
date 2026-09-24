@@ -39,6 +39,11 @@ public sealed class LoudnessMeter
     private double _momentaryMax = -70.0;
     private double _shortTermMax = -70.0;
 
+    public double CurrentMomentaryLufs => _currentMomentaryLufs;
+    public double CurrentShortTermLufs => _currentShortTermLufs;
+    public double MomentaryMax => _momentaryMax;
+    public double ShortTermMax => _shortTermMax;
+
     public LoudnessMeter(double sampleRate, int channelCount = 2, double[]? channelWeights = null)
     {
         if (sampleRate <= 0)

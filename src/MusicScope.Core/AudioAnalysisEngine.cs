@@ -26,7 +26,11 @@ public sealed class AudioAnalysisEngine
     private readonly double[] _fftRealBuffer = new double[FftSize];
     private readonly double[] _fftImagBuffer = new double[FftSize];
     private readonly double[] _accumulatedSpectrum = new double[FftSize / 2];
+    private readonly double[] _latestInstantSpectrumDb = new double[FftSize / 2];
     private int _spectrumFftCount;
+
+    private readonly float[] _goniometerX = new float[256];
+    private readonly float[] _goniometerY = new float[256];
 
     public AudioAnalysisEngine(double sampleRate = 44100.0, int channelCount = 2)
     {
@@ -39,6 +43,7 @@ public sealed class AudioAnalysisEngine
 
         _fft = new FastFourierTransform(FftSize);
         _fftWindow = WindowFunctions.Create(WindowType.BlackmanHarris, FftSize);
+        Array.Fill(_latestInstantSpectrumDb, -140.0);
     }
 
     /// <summary>
@@ -52,6 +57,7 @@ public sealed class AudioAnalysisEngine
         if (_channelCount >= 2)
         {
             _stereoAnalyzer.ProcessInterleaved(interleavedSamples);
+            _stereoAnalyzer.GenerateGoniometerPoints(interleavedSamples, _goniometerX, _goniometerY);
         }
 
         // Perform periodic FFT on mono downmix
@@ -78,14 +84,52 @@ public sealed class AudioAnalysisEngine
 
             _fft.Forward(_fftRealBuffer, _fftImagBuffer);
 
-            // Accumulate power spectrum
+            // Accumulate power spectrum and update instant spectrum
+            double scale = 2.0 / FftSize;
             for (int b = 0; b < FftSize / 2; b++)
             {
                 double magSq = _fftRealBuffer[b] * _fftRealBuffer[b] + _fftImagBuffer[b] * _fftImagBuffer[b];
                 _accumulatedSpectrum[b] += magSq;
+
+                double instantMag = Math.Sqrt(magSq) * scale;
+                double instantDb = instantMag > 1e-7 ? Math.Max(-140.0, 20.0 * Math.Log10(instantMag)) : -140.0;
+                // Exponential decay smoothing for spectrum display
+                _latestInstantSpectrumDb[b] = _latestInstantSpectrumDb[b] * 0.4 + instantDb * 0.6;
             }
             _spectrumFftCount++;
         }
+    }
+
+    /// <summary>
+    /// Captures a real-time snapshot of all current metrics, levels, spectrum, and scope.
+    /// </summary>
+    public AudioRealtimeSnapshot GetRealtimeSnapshot(double progress = 0.0)
+    {
+        double[] spectrumCopy = new double[FftSize / 2];
+        Array.Copy(_latestInstantSpectrumDb, spectrumCopy, spectrumCopy.Length);
+
+        float[] gonioX = new float[_goniometerX.Length];
+        float[] gonioY = new float[_goniometerY.Length];
+        Array.Copy(_goniometerX, gonioX, gonioX.Length);
+        Array.Copy(_goniometerY, gonioY, gonioY.Length);
+
+        return new AudioRealtimeSnapshot
+        {
+            ProgressFraction = progress,
+            MomentaryLufs = _loudnessMeter.CurrentMomentaryLufs,
+            ShortTermLufs = _loudnessMeter.CurrentShortTermLufs,
+            RunningIntegratedLufs = _loudnessMeter.CurrentShortTermLufs, // during live stream, short-term represents the current perceived level
+            CurrentPeakLeftDb = _truePeakMeter.CurrentBlockPeakLeftDb,
+            CurrentPeakRightDb = _truePeakMeter.CurrentBlockPeakRightDb,
+            CurrentRmsLeftDb = _truePeakMeter.CurrentBlockRmsLeftDb,
+            CurrentRmsRightDb = _truePeakMeter.CurrentBlockRmsRightDb,
+            MaxTruePeakLeftDb = _truePeakMeter.MaxTruePeakLeftDb,
+            MaxTruePeakRightDb = _truePeakMeter.MaxTruePeakRightDb,
+            Correlation = _stereoAnalyzer.RealtimeCorrelation,
+            InstantSpectrumDb = spectrumCopy,
+            GoniometerPointsX = gonioX,
+            GoniometerPointsY = gonioY
+        };
     }
 
     /// <summary>

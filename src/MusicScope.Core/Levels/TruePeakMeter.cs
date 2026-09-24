@@ -61,7 +61,17 @@ public sealed class TruePeakMeter
     private readonly double[] _samplePeakMax;
     private readonly double[] _truePeakMax;
     private readonly double[] _sumSquares;
+    private readonly double[] _currentBlockPeak;
+    private readonly double[] _currentBlockRms;
     private long _totalFrames;
+
+    public double CurrentBlockPeakLeftDb => _currentBlockPeak[0] > 1e-6 ? 20.0 * Math.Log10(_currentBlockPeak[0]) : -100.0;
+    public double CurrentBlockPeakRightDb => _channelCount > 1 && _currentBlockPeak[1] > 1e-6 ? 20.0 * Math.Log10(_currentBlockPeak[1]) : CurrentBlockPeakLeftDb;
+    public double CurrentBlockRmsLeftDb => _currentBlockRms[0] > 1e-6 ? 20.0 * Math.Log10(_currentBlockRms[0]) : -100.0;
+    public double CurrentBlockRmsRightDb => _channelCount > 1 && _currentBlockRms[1] > 1e-6 ? 20.0 * Math.Log10(_currentBlockRms[1]) : CurrentBlockRmsLeftDb;
+
+    public double MaxTruePeakLeftDb => _truePeakMax[0] > 1e-6 ? 20.0 * Math.Log10(_truePeakMax[0]) : -100.0;
+    public double MaxTruePeakRightDb => _channelCount > 1 && _truePeakMax[1] > 1e-6 ? 20.0 * Math.Log10(_truePeakMax[1]) : MaxTruePeakLeftDb;
 
     public TruePeakMeter(int channelCount = 2)
     {
@@ -74,6 +84,8 @@ public sealed class TruePeakMeter
         _samplePeakMax = new double[channelCount];
         _truePeakMax = new double[channelCount];
         _sumSquares = new double[channelCount];
+        _currentBlockPeak = new double[channelCount];
+        _currentBlockRms = new double[channelCount];
 
         for (int ch = 0; ch < channelCount; ch++)
         {
@@ -89,6 +101,11 @@ public sealed class TruePeakMeter
     public void ProcessInterleaved(ReadOnlySpan<double> samples)
     {
         int frameCount = samples.Length / _channelCount;
+        if (frameCount == 0) return;
+
+        double[] blockSumSq = new double[_channelCount];
+        double[] blockPeak = new double[_channelCount];
+
         for (int frame = 0; frame < frameCount; frame++)
         {
             int baseIdx = frame * _channelCount;
@@ -96,6 +113,11 @@ public sealed class TruePeakMeter
             {
                 double s = samples[baseIdx + ch];
                 double absS = Math.Abs(s);
+
+                if (absS > blockPeak[ch])
+                    blockPeak[ch] = absS;
+
+                blockSumSq[ch] += s * s;
 
                 // Update sample peak
                 if (absS > _samplePeakMax[ch])
@@ -131,6 +153,12 @@ public sealed class TruePeakMeter
             }
             _totalFrames++;
         }
+
+        for (int ch = 0; ch < _channelCount; ch++)
+        {
+            _currentBlockPeak[ch] = blockPeak[ch];
+            _currentBlockRms[ch] = Math.Sqrt(blockSumSq[ch] / frameCount);
+        }
     }
 
     /// <summary>
@@ -139,6 +167,11 @@ public sealed class TruePeakMeter
     public void ProcessInterleaved(ReadOnlySpan<float> samples)
     {
         int frameCount = samples.Length / _channelCount;
+        if (frameCount == 0) return;
+
+        double[] blockSumSq = new double[_channelCount];
+        double[] blockPeak = new double[_channelCount];
+
         for (int frame = 0; frame < frameCount; frame++)
         {
             int baseIdx = frame * _channelCount;
@@ -146,6 +179,11 @@ public sealed class TruePeakMeter
             {
                 double s = samples[baseIdx + ch];
                 double absS = Math.Abs(s);
+
+                if (absS > blockPeak[ch])
+                    blockPeak[ch] = absS;
+
+                blockSumSq[ch] += s * s;
 
                 if (absS > _samplePeakMax[ch])
                     _samplePeakMax[ch] = absS;
@@ -176,6 +214,12 @@ public sealed class TruePeakMeter
                 }
             }
             _totalFrames++;
+        }
+
+        for (int ch = 0; ch < _channelCount; ch++)
+        {
+            _currentBlockPeak[ch] = blockPeak[ch];
+            _currentBlockRms[ch] = Math.Sqrt(blockSumSq[ch] / frameCount);
         }
     }
 

@@ -84,7 +84,7 @@
                                     <Border Background="#161B22" Padding="8,4" CornerRadius="6,6,0,0">
                                         <TextBlock Text="STEREO GONIOMETER &amp; CORRELATION" FontSize="11" FontWeight="Bold" Foreground="#8B949E"/>
                                     </Border>
-                                    <ctrl:GoniometerControl Grid.Row="1" Correlation="{Binding PhaseCorrelation}"/>
+                                    <ctrl:GoniometerControl Grid.Row="1" Correlation="{Binding PhaseCorrelation}" PointsX="{Binding GoniometerPointsX}" PointsY="{Binding GoniometerPointsY}"/>
                                 </Grid>
                             </Border>
 

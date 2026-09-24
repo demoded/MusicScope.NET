@@ -83,9 +83,15 @@ public partial class MainViewModel : ViewModelBase
     [ObservableProperty]
     private double _sideLevel = -100.0;
 
-    // Spectrum
+    // Spectrum & Goniometer
     [ObservableProperty]
     private double[]? _spectrumMagnitudes;
+
+    [ObservableProperty]
+    private float[]? _goniometerPointsX;
+
+    [ObservableProperty]
+    private float[]? _goniometerPointsY;
 
     [ObservableProperty]
     private double _sampleRate = 44100.0;
@@ -146,9 +152,9 @@ public partial class MainViewModel : ViewModelBase
             Buffer.BlockCopy(e.AudioBytes.ToArray(), 0, floats, 0, e.AudioBytes.Length);
 
             _liveEngine.ProcessAudioBlock(floats);
-            var report = _liveEngine.GenerateReport("DAW Live Stream", "TCP:8989", "PCM Float", TimeSpan.Zero);
+            var snapshot = _liveEngine.GetRealtimeSnapshot();
 
-            Dispatcher.UIThread.Post(() => UpdateFromReport(report));
+            Dispatcher.UIThread.Post(() => UpdateFromSnapshot(snapshot));
         };
     }
 
@@ -175,15 +181,25 @@ public partial class MainViewModel : ViewModelBase
 
             var engine = new AudioAnalysisEngine(info.SampleRate, info.ChannelCount);
 
+            var sw = System.Diagnostics.Stopwatch.StartNew();
+            long lastUiUpdateMs = 0;
+
             await _decoder.DecodeAsync(path, (chunk, channels, sRate, progress) =>
             {
                 engine.ProcessAudioBlock(chunk.Span);
-                Dispatcher.UIThread.Post(() => AnalysisProgress = progress * 100.0);
+
+                long now = sw.ElapsedMilliseconds;
+                if (now - lastUiUpdateMs >= 25) // ~40 FPS real-time visual update
+                {
+                    lastUiUpdateMs = now;
+                    var snapshot = engine.GetRealtimeSnapshot(progress);
+                    Dispatcher.UIThread.Post(() => UpdateFromSnapshot(snapshot));
+                }
                 return Task.CompletedTask;
             }, ct);
 
             CurrentReport = engine.GenerateReport(TrackTitle, path, info.FormatName, info.Duration, info.BitDepth);
-            UpdateFromReport(CurrentReport);
+            Dispatcher.UIThread.Post(() => UpdateFromReport(CurrentReport));
         }
         catch (OperationCanceledException) { }
         catch (Exception ex)
@@ -195,6 +211,29 @@ public partial class MainViewModel : ViewModelBase
             IsAnalyzing = false;
             AnalysisProgress = 100.0;
         }
+    }
+
+    private void UpdateFromSnapshot(AudioRealtimeSnapshot s)
+    {
+        AnalysisProgress = s.ProgressFraction * 100.0;
+        IntegratedLoudness = s.RunningIntegratedLufs;
+        MomentaryMax = s.MomentaryLufs;
+        ShortTermMax = s.ShortTermLufs;
+
+        SamplePeakLeft = s.CurrentPeakLeftDb;
+        SamplePeakRight = s.CurrentPeakRightDb;
+        TruePeakLeft = s.MaxTruePeakLeftDb;
+        TruePeakRight = s.MaxTruePeakRightDb;
+        RmsLeft = s.CurrentRmsLeftDb;
+        RmsRight = s.CurrentRmsRightDb;
+
+        PhaseCorrelation = s.Correlation;
+        MidLevel = s.MidLevelDb;
+        SideLevel = s.SideLevelDb;
+
+        SpectrumMagnitudes = s.InstantSpectrumDb;
+        GoniometerPointsX = s.GoniometerPointsX;
+        GoniometerPointsY = s.GoniometerPointsY;
     }
 
     [RelayCommand]
