@@ -7,7 +7,7 @@
         mc:Ignorable="d" d:DesignWidth="1180" d:DesignHeight="740"
         x:Class="MusicScope.Desktop.Views.MainWindow"
         x:DataType="vm:MainViewModel"
-        Background="#0E1217"
+        Background="#000000"
         Foreground="#E2E8F0"
         MinWidth="960" MinHeight="600"
         Width="1200" Height="780"
@@ -18,136 +18,113 @@
         <vm:MainViewModel />
     </Design.DataContext>
 
-    <Grid RowDefinitions="Auto,*,Auto">
+    <Grid RowDefinitions="Auto,*,Auto" Background="#000000">
         <!-- Top Toolbar & Header -->
-        <Border Grid.Row="0" Background="#161B22" BorderBrush="#2D333B" BorderThickness="0,0,0,1" Padding="14,10">
+        <Border Grid.Row="0" Background="#0A0D10" BorderBrush="#1C2127" BorderThickness="0,0,0,1" Padding="12,6">
             <Grid ColumnDefinitions="Auto,Auto,*,Auto,Auto">
                 <StackPanel Orientation="Horizontal" Spacing="8" VerticalAlignment="Center">
-                    <TextBlock Text="MusicScope" FontSize="18" FontWeight="Bold" Foreground="#00E5FF"/>
-                    <Border Background="#21262D" CornerRadius="4" Padding="6,2">
-                        <TextBlock Text=".NET 10" FontSize="11" Foreground="#8B949E" FontWeight="SemiBold"/>
+                    <TextBlock Text="MusicScope" FontSize="16" FontWeight="Bold" Foreground="#00E5FF"/>
+                    <Border Background="#161B22" CornerRadius="4" Padding="5,1">
+                        <TextBlock Text=".NET 10" FontSize="10" Foreground="#8B949E" FontWeight="SemiBold"/>
                     </Border>
                 </StackPanel>
 
-                <StackPanel Grid.Column="1" Orientation="Horizontal" Spacing="8" Margin="24,0,0,0">
-                    <Button Name="OpenFileBtn" Click="OnOpenFileClick" Background="#21262D" Foreground="#F0F6FC" Padding="12,6" CornerRadius="4">
+                <StackPanel Grid.Column="1" Orientation="Horizontal" Spacing="6" Margin="16,0,0,0">
+                    <Button Name="OpenFileBtn" Click="OnOpenFileClick" Background="#161B22" Foreground="#F0F6FC" Padding="10,5" CornerRadius="4">
                         <StackPanel Orientation="Horizontal" Spacing="6">
-                            <TextBlock Text="📁 Open Audio File"/>
+                            <TextBlock Text="📁 Open Audio File" FontSize="12"/>
                         </StackPanel>
                     </Button>
-                    <Button Command="{Binding ToggleDawServerCommand}" Background="#21262D" Foreground="#F0F6FC" Padding="12,6" CornerRadius="4">
+                    <Button Command="{Binding ToggleDawServerCommand}" Background="#161B22" Foreground="#F0F6FC" Padding="10,5" CornerRadius="4">
                         <StackPanel Orientation="Horizontal" Spacing="6">
-                            <TextBlock Text="🔌 DAW Server"/>
+                            <TextBlock Text="🔌 DAW Server" FontSize="12"/>
                         </StackPanel>
                     </Button>
-                    <Button Name="ExportReportBtn" Click="OnExportReportClick" Background="#21262D" Foreground="#F0F6FC" Padding="12,6" CornerRadius="4">
+                    <Button Name="ExportReportBtn" Click="OnExportReportClick" Background="#161B22" Foreground="#F0F6FC" Padding="10,5" CornerRadius="4">
                         <StackPanel Orientation="Horizontal" Spacing="6">
-                            <TextBlock Text="💾 Export Report"/>
+                            <TextBlock Text="💾 Export Report" FontSize="12"/>
                         </StackPanel>
                     </Button>
                 </StackPanel>
 
                 <!-- Track info & DAW status -->
-                <StackPanel Grid.Column="2" VerticalAlignment="Center" Margin="20,0" HorizontalAlignment="Center">
-                    <TextBlock Text="{Binding TrackTitle}" FontWeight="SemiBold" FontSize="14" Foreground="#F0F6FC" TextAlignment="Center"/>
-                    <TextBlock Text="{Binding FormatDetails}" FontSize="11" Foreground="#8B949E" TextAlignment="Center"/>
+                <StackPanel Grid.Column="2" VerticalAlignment="Center" Margin="16,0" HorizontalAlignment="Center">
+                    <TextBlock Text="{Binding TrackTitle}" FontWeight="SemiBold" FontSize="13" Foreground="#F0F6FC" TextAlignment="Center"/>
+                    <TextBlock Text="{Binding FormatDetails}" FontSize="10" Foreground="#8B949E" TextAlignment="Center"/>
                 </StackPanel>
 
                 <!-- DAW status indicator badge -->
-                <Border Grid.Column="3" Background="#1C2128" BorderBrush="#30363D" BorderThickness="1" CornerRadius="4" Padding="10,4" Margin="10,0" VerticalAlignment="Center">
-                    <TextBlock Text="{Binding DawStatusText}" FontSize="11" Foreground="#58A6FF"/>
+                <Border Grid.Column="3" Background="#11161D" BorderBrush="#252B33" BorderThickness="1" CornerRadius="4" Padding="8,3" Margin="8,0" VerticalAlignment="Center">
+                    <TextBlock Text="{Binding DawStatusText}" FontSize="10" Foreground="#58A6FF"/>
                 </Border>
             </Grid>
         </Border>
 
         <!-- Main Body: Tabs -->
-        <TabControl Grid.Row="1" Background="Transparent" Margin="6,4">
-            <!-- TAB 1: Core Precision Analyzer -->
-            <TabItem Header="Precision Analyzer" FontSize="13" FontWeight="SemiBold">
-                <Grid RowDefinitions="*,Auto" Margin="4">
-                    <Grid ColumnDefinitions="*,340,90" Margin="0,0,0,6">
-                        <!-- Left: Frequency Spectrum -->
-                        <Border Grid.Column="0" Background="#0F1216" BorderBrush="#22272E" BorderThickness="1" CornerRadius="6" Margin="0,0,6,0">
-                            <Grid RowDefinitions="Auto,*">
-                                <Border Background="#161B22" Padding="8,4" CornerRadius="6,6,0,0">
-                                    <TextBlock Text="FREQUENCY SPECTRUM (FFT)" FontSize="11" FontWeight="Bold" Foreground="#8B949E"/>
-                                </Border>
-                                <ctrl:SpectrumGraphControl Grid.Row="1" MagnitudesDb="{Binding SpectrumMagnitudes}" SampleRate="{Binding SampleRate}"/>
-                            </Grid>
+        <TabControl Grid.Row="1" Background="#000000" Padding="0" Margin="0">
+            <!-- TAB 1: Authentic MusicScope Analyzer -->
+            <TabItem Header="MusicScope" FontSize="12" FontWeight="SemiBold">
+                <Grid RowDefinitions="275,*,170" Background="#000000">
+                    <!-- Row 0: Top 5 Boxes -->
+                    <Grid Grid.Row="0" ColumnDefinitions="1.1*,1.4*,1.1*,1.6*,1.6*" Background="#000000">
+                        <!-- Box 1: Format Matrix -->
+                        <Border Grid.Column="0" BorderBrush="#1C2127" BorderThickness="0,0,1,1" Background="#000000">
+                            <ctrl:FormatBoxControl FormatName="{Binding FormatName}"
+                                                   SampleRate="{Binding SampleRate}"
+                                                   BitDepth="{Binding BitDepth}"
+                                                   IsDsd="{Binding IsDsd}"/>
                         </Border>
 
-                        <!-- Middle: Goniometer & Circular Loudness Dials -->
-                        <Grid Grid.Column="1" RowDefinitions="220,*" Margin="0,0,6,0">
-                            <!-- Goniometer / Vector Scope -->
-                            <Border Grid.Row="0" Background="#0F1216" BorderBrush="#22272E" BorderThickness="1" CornerRadius="6" Margin="0,0,0,6">
-                                <Grid RowDefinitions="Auto,*">
-                                    <Border Background="#161B22" Padding="8,4" CornerRadius="6,6,0,0">
-                                        <TextBlock Text="STEREO GONIOMETER &amp; CORRELATION" FontSize="11" FontWeight="Bold" Foreground="#8B949E"/>
-                                    </Border>
-                                    <ctrl:GoniometerControl Grid.Row="1" Correlation="{Binding PhaseCorrelation}" PointsX="{Binding GoniometerPointsX}" PointsY="{Binding GoniometerPointsY}"/>
-                                </Grid>
-                            </Border>
+                        <!-- Box 2: Levels & Bit Monitor -->
+                        <Border Grid.Column="1" BorderBrush="#1C2127" BorderThickness="0,0,1,1" Background="#000000">
+                            <ctrl:LevelsBoxControl TruePeakLeft="{Binding TruePeakLeft}"
+                                                   TruePeakRight="{Binding TruePeakRight}"
+                                                   RmsLeft="{Binding RmsLeft}"
+                                                   RmsRight="{Binding RmsRight}"
+                                                   CrestFactor="{Binding CrestFactor}"
+                                                   Plr="{Binding Plr}"
+                                                   MomentaryLeft="{Binding MomentaryMax}"
+                                                   MomentaryRight="{Binding MomentaryMax}"
+                                                   ShortTermLeft="{Binding ShortTermMax}"
+                                                   ShortTermRight="{Binding ShortTermMax}"
+                                                   IntegratedLoudness="{Binding IntegratedLoudness}"
+                                                   LoudnessRange="{Binding LoudnessRange}"/>
+                        </Border>
 
-                            <!-- Circular Loudness Dials -->
-                            <Border Grid.Row="1" Background="#0F1216" BorderBrush="#22272E" BorderThickness="1" CornerRadius="6">
-                                <Grid RowDefinitions="Auto,*">
-                                    <Border Background="#161B22" Padding="8,4" CornerRadius="6,6,0,0">
-                                        <TextBlock Text="LOUDNESS &amp; DYNAMICS (EBU R128)" FontSize="11" FontWeight="Bold" Foreground="#8B949E"/>
-                                    </Border>
-                                    <Grid Grid.Row="1" ColumnDefinitions="*,*">
-                                        <ctrl:CircularDialControl Grid.Column="0" Value="{Binding IntegratedLoudness}" MinValue="-60" MaxValue="0" Label="INTEGRATED" Unit="LUFS"/>
-                                        <ctrl:CircularDialControl Grid.Column="1" Value="{Binding LoudnessRange}" MinValue="0" MaxValue="30" Label="LRA" Unit="LU"/>
-                                    </Grid>
-                                </Grid>
-                            </Border>
-                        </Grid>
+                        <!-- Box 3: S-Mode Loudness & LED Peak Meter -->
+                        <Border Grid.Column="2" BorderBrush="#1C2127" BorderThickness="0,0,1,1" Background="#000000">
+                            <ctrl:SModeMeterControl PeakLeftDb="{Binding SamplePeakLeft}"
+                                                    PeakRightDb="{Binding SamplePeakRight}"
+                                                    MomentaryLufs="{Binding MomentaryMax}"
+                                                    ShortTermLufs="{Binding ShortTermMax}"
+                                                    LoudnessRange="{Binding LoudnessRange}"/>
+                        </Border>
 
-                        <!-- Right: True Peak & Sample Peak LED Meters -->
-                        <Border Grid.Column="2" Background="#0F1216" BorderBrush="#22272E" BorderThickness="1" CornerRadius="6">
-                            <Grid RowDefinitions="Auto,*">
-                                <Border Background="#161B22" Padding="6,4" CornerRadius="6,6,0,0">
-                                    <TextBlock Text="METERS" FontSize="10" FontWeight="Bold" Foreground="#8B949E" TextAlignment="Center"/>
-                                </Border>
-                                <Grid Grid.Row="1" ColumnDefinitions="*,*" Margin="4">
-                                    <ctrl:LevelMeterControl Grid.Column="0" ChannelName="L" PeakDb="{Binding SamplePeakLeft}" TruePeakDb="{Binding TruePeakLeft}" RmsDb="{Binding RmsLeft}"/>
-                                    <ctrl:LevelMeterControl Grid.Column="1" ChannelName="R" PeakDb="{Binding SamplePeakRight}" TruePeakDb="{Binding TruePeakRight}" RmsDb="{Binding RmsRight}"/>
-                                </Grid>
-                            </Grid>
+                        <!-- Box 4: Circular Polar History Radar Dial -->
+                        <Border Grid.Column="3" BorderBrush="#1C2127" BorderThickness="0,0,1,1" Background="#000000">
+                            <ctrl:HistoryDialControl PeakHistory="{Binding PeakHistory}"
+                                                     LoudnessHistory="{Binding LoudnessHistory}"
+                                                     TrackProgress="{Binding TrackProgress}"/>
+                        </Border>
+
+                        <!-- Box 5: Stereo Goniometer / Vector Scope & Correlation Bar -->
+                        <Border Grid.Column="4" BorderBrush="#1C2127" BorderThickness="0,0,0,1" Background="#000000">
+                            <ctrl:GoniometerControl Correlation="{Binding PhaseCorrelation}"
+                                                    PointsX="{Binding GoniometerPointsX}"
+                                                    PointsY="{Binding GoniometerPointsY}"/>
                         </Border>
                     </Grid>
 
-                    <!-- Bottom Metrics Cards -->
-                    <Border Grid.Row="1" Background="#161B22" BorderBrush="#22272E" BorderThickness="1" CornerRadius="6" Padding="12,8">
-                        <Grid ColumnDefinitions="*,*,*,*,*,*,*">
-                            <StackPanel Grid.Column="0" HorizontalAlignment="Center">
-                                <TextBlock Text="INTEGRATED" FontSize="9" Foreground="#8B949E" TextAlignment="Center"/>
-                                <TextBlock Text="{Binding IntegratedLoudness, StringFormat='{}{0:F1} LUFS'}" FontSize="14" FontWeight="Bold" Foreground="#00E5FF" TextAlignment="Center"/>
-                            </StackPanel>
-                            <StackPanel Grid.Column="1" HorizontalAlignment="Center">
-                                <TextBlock Text="MAX MOMENTARY" FontSize="9" Foreground="#8B949E" TextAlignment="Center"/>
-                                <TextBlock Text="{Binding MomentaryMax, StringFormat='{}{0:F1} LUFS'}" FontSize="14" FontWeight="Bold" Foreground="#58A6FF" TextAlignment="Center"/>
-                            </StackPanel>
-                            <StackPanel Grid.Column="2" HorizontalAlignment="Center">
-                                <TextBlock Text="MAX SHORT-TERM" FontSize="9" Foreground="#8B949E" TextAlignment="Center"/>
-                                <TextBlock Text="{Binding ShortTermMax, StringFormat='{}{0:F1} LUFS'}" FontSize="14" FontWeight="Bold" Foreground="#58A6FF" TextAlignment="Center"/>
-                            </StackPanel>
-                            <StackPanel Grid.Column="3" HorizontalAlignment="Center">
-                                <TextBlock Text="LOUDNESS RANGE" FontSize="9" Foreground="#8B949E" TextAlignment="Center"/>
-                                <TextBlock Text="{Binding LoudnessRange, StringFormat='{}{0:F1} LU'}" FontSize="14" FontWeight="Bold" Foreground="#7EE787" TextAlignment="Center"/>
-                            </StackPanel>
-                            <StackPanel Grid.Column="4" HorizontalAlignment="Center">
-                                <TextBlock Text="TRUE PEAK (MAX)" FontSize="9" Foreground="#8B949E" TextAlignment="Center"/>
-                                <TextBlock Text="{Binding TruePeakLeft, StringFormat='{}{0:F2} dBTP'}" FontSize="14" FontWeight="Bold" Foreground="#FFA657" TextAlignment="Center"/>
-                            </StackPanel>
-                            <StackPanel Grid.Column="5" HorizontalAlignment="Center">
-                                <TextBlock Text="DYNAMIC RANGE" FontSize="9" Foreground="#8B949E" TextAlignment="Center"/>
-                                <TextBlock Text="{Binding DynamicRange, StringFormat='{}DR{0:F0}'}" FontSize="14" FontWeight="Bold" Foreground="#D2A8FF" TextAlignment="Center"/>
-                            </StackPanel>
-                            <StackPanel Grid.Column="6" HorizontalAlignment="Center">
-                                <TextBlock Text="CORRELATION" FontSize="9" Foreground="#8B949E" TextAlignment="Center"/>
-                                <TextBlock Text="{Binding PhaseCorrelation, StringFormat='{}{0:F3}'}" FontSize="14" FontWeight="Bold" Foreground="#7EE787" TextAlignment="Center"/>
-                            </StackPanel>
-                        </Grid>
+                    <!-- Row 1: Linear Frequency Spectrum [kHz] -->
+                    <Border Grid.Row="1" BorderBrush="#1C2127" BorderThickness="0,0,0,1" Background="#000000">
+                        <ctrl:SpectrumGraphControl MagnitudesDb="{Binding SpectrumMagnitudes}"
+                                                   SampleRate="{Binding SampleRate}"/>
+                    </Border>
+
+                    <!-- Row 2: 2D Waterfall / Spectrogram Heatmap -->
+                    <Border Grid.Row="2" Background="#000000">
+                        <ctrl:WaterfallControl LatestSpectrum="{Binding SpectrumMagnitudes}"
+                                               TrackProgress="{Binding TrackProgress}"/>
                     </Border>
                 </Grid>
             </TabItem>
@@ -215,7 +192,7 @@
         </TabControl>
 
         <!-- Bottom Status Bar -->
-        <Border Grid.Row="2" Background="#161B22" BorderBrush="#2D333B" BorderThickness="0,1,0,0" Padding="12,4">
+        <Border Grid.Row="2" Background="#0A0D10" BorderBrush="#1C2127" BorderThickness="0,1,0,0" Padding="12,4">
             <Grid ColumnDefinitions="*,Auto">
                 <TextBlock Grid.Column="0" Text="{Binding FilePath, FallbackValue='Ready'}" FontSize="11" Foreground="#8B949E" VerticalAlignment="Center"/>
                 <ProgressBar Grid.Column="1" Width="140" Height="6" Value="{Binding AnalysisProgress}" IsVisible="{Binding IsAnalyzing}" Margin="8,0,0,0"/>

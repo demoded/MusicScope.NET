@@ -7,8 +7,8 @@ using Avalonia.Media;
 namespace MusicScope.Desktop.Controls;
 
 /// <summary>
-/// Circular phosphor-style Goniometer / Vector Scope with real-time Phase Correlation Bar.
-/// Directly models the StereoMeterControl from MusicScope.
+/// Phosphor-style Goniometer / Vector Scope with Tri-color Phase Correlation Bar.
+/// Directly models Box 5 (Stereo) from the MusicScope UI.
 /// </summary>
 public sealed class GoniometerControl : Control
 {
@@ -39,11 +39,18 @@ public sealed class GoniometerControl : Control
         set => SetValue(PointsYProperty, value);
     }
 
-    private static readonly IBrush BgBrush = new SolidColorBrush(Color.FromRgb(15, 18, 22));
-    private static readonly IBrush ReticleBrush = new SolidColorBrush(Color.FromArgb(40, 255, 255, 255));
-    private static readonly IBrush PhosphorBrush = new SolidColorBrush(Color.FromArgb(180, 0, 255, 170));
-    private static readonly IPen PhosphorPen = new Pen(new SolidColorBrush(Color.FromArgb(200, 0, 255, 170)), 1.2);
-    private static readonly IBrush LabelBrush = new SolidColorBrush(Color.FromRgb(130, 145, 160));
+    private static readonly IBrush HeaderBrush = new SolidColorBrush(Color.FromRgb(0, 220, 0)); // Green Stereo
+    private static readonly IBrush CornerLabelBrush = new SolidColorBrush(Color.FromRgb(220, 220, 220));
+    private static readonly IBrush OutOfPhaseBrush = new SolidColorBrush(Color.FromRgb(55, 60, 65));
+    private static readonly IBrush PhosphorGlowBrush = new SolidColorBrush(Color.FromArgb(140, 0, 255, 68));
+    private static readonly IBrush PhosphorCoreBrush = new SolidColorBrush(Color.FromArgb(220, 20, 255, 100));
+    private static readonly IPen AxisPen = new Pen(new SolidColorBrush(Color.FromRgb(45, 50, 55)), 1);
+
+    // Correlation Bar Brushes
+    private static readonly IBrush CorrRedBrush = new SolidColorBrush(Color.FromRgb(187, 0, 0));
+    private static readonly IBrush CorrYellowBrush = new SolidColorBrush(Color.FromRgb(221, 221, 0));
+    private static readonly IBrush CorrGreenBrush = new SolidColorBrush(Color.FromRgb(0, 153, 0));
+    private static readonly IPen CursorPen = new Pen(new SolidColorBrush(Color.FromRgb(255, 255, 255)), 2);
 
     static GoniometerControl()
     {
@@ -54,37 +61,40 @@ public sealed class GoniometerControl : Control
     {
         double width = Bounds.Width;
         double height = Bounds.Height;
-        if (width < 30 || height < 30)
-            return;
+        if (width < 30 || height < 30) return;
 
-        context.FillRectangle(BgBrush, new Rect(0, 0, width, height));
+        var tf = Typeface.Default;
 
-        // Reserve bottom 28 pixels for the correlation meter bar
-        double scopeHeight = Math.Max(20, height - 28);
+        // Header: Stereo
+        DrawText(context, "Stereo", tf, 11, HeaderBrush, 8, 8);
+
+        // Scope Area
+        double barAreaHeight = 32;
+        double scopeTop = 22;
+        double scopeBottom = height - barAreaHeight;
+        double scopeHeight = scopeBottom - scopeTop;
         double centerX = width / 2.0;
-        double centerY = scopeHeight / 2.0;
-        double radius = Math.Min(centerX, centerY) - 8;
+        double centerY = scopeTop + scopeHeight / 2.0;
+        double radius = Math.Min(centerX - 16, scopeHeight / 2.0 - 10);
 
-        if (radius > 10)
+        if (radius > 15)
         {
-            // Draw circular reticle
-            var reticlePen = new Pen(ReticleBrush, 1);
-            context.DrawEllipse(null, reticlePen, new Point(centerX, centerY), radius, radius);
-            context.DrawEllipse(null, reticlePen, new Point(centerX, centerY), radius * 0.5, radius * 0.5);
+            // Corner Labels: +L (top-left), +R (top-right), -R (bottom-left), -L (bottom-right)
+            DrawText(context, "+L", tf, 10, CornerLabelBrush, 8, scopeTop + 4);
+            DrawTextRight(context, "+R", tf, 10, CornerLabelBrush, width - 8, scopeTop + 4);
+            DrawText(context, "-R", tf, 10, CornerLabelBrush, 8, scopeBottom - 14);
+            DrawTextRight(context, "-L", tf, 10, CornerLabelBrush, width - 8, scopeBottom - 14);
 
-            // Diagonal axes: +45 deg (L) and -45 deg (R)
-            double diagOffset = radius * 0.70710678;
-            context.DrawLine(reticlePen, new Point(centerX - diagOffset, centerY + diagOffset), new Point(centerX + diagOffset, centerY - diagOffset));
-            context.DrawLine(reticlePen, new Point(centerX - diagOffset, centerY - diagOffset), new Point(centerX + diagOffset, centerY + diagOffset));
+            // "out of phase" dim labels
+            DrawText(context, "out of\nphase", tf, 9, OutOfPhaseBrush, 8, centerY - 10);
+            DrawTextRight(context, "out of\nphase", tf, 9, OutOfPhaseBrush, width - 8, centerY - 10);
 
-            // Axis labels: +M (top), -M (bottom), +S (right), -S (left)
-            var font = Typeface.Default;
-            DrawCenteredText(context, "+M", font, 9, LabelBrush, centerX, centerY - radius + 4);
-            DrawCenteredText(context, "-M", font, 9, LabelBrush, centerX, centerY + radius - 12);
-            DrawCenteredText(context, "+S", font, 9, LabelBrush, centerX + radius - 14, centerY - 6);
-            DrawCenteredText(context, "-S", font, 9, LabelBrush, centerX - radius + 4, centerY - 6);
+            // Diagonal crosshair axes
+            double d = radius * 0.95;
+            context.DrawLine(AxisPen, new Point(centerX - d, centerY - d), new Point(centerX + d, centerY + d));
+            context.DrawLine(AxisPen, new Point(centerX - d, centerY + d), new Point(centerX + d, centerY - d));
 
-            // Draw vector scope trace points
+            // Draw Phosphor Cloud (Lissajous stereo field)
             float[]? px = PointsX;
             float[]? py = PointsY;
             if (px != null && py != null && px.Length > 0 && py.Length > 0)
@@ -94,40 +104,49 @@ public sealed class GoniometerControl : Control
                 {
                     double x = centerX + px[i] * radius;
                     double y = centerY - py[i] * radius;
-                    context.DrawRectangle(PhosphorBrush, null, new Rect(x, y, 1.5, 1.5));
+                    context.DrawRectangle(PhosphorGlowBrush, null, new Rect(x - 1, y - 1, 3, 3));
+                    context.DrawRectangle(PhosphorCoreBrush, null, new Rect(x, y, 1.2, 1.2));
                 }
             }
         }
 
-        // Draw Phase Correlation Bar at bottom
-        double barY = height - 22;
-        double barWidth = width - 40;
-        double barLeft = 20;
+        // Tri-Color Phase Correlation Bar at bottom
+        double barY = height - 20;
+        double barLeft = 14;
+        double barRight = width - 14;
+        double barWidth = barRight - barLeft;
+        double barH = 7;
 
-        // Background groove
-        context.FillRectangle(new SolidColorBrush(Color.FromRgb(30, 35, 42)), new Rect(barLeft, barY, barWidth, 10));
+        // Segments: -1 to -0.2 (Red, 40%), -0.2 to +0.2 (Yellow, 20%), +0.2 to +1.0 (Green, 40%)
+        double redW = barWidth * 0.40;
+        double yellowW = barWidth * 0.20;
+        double greenW = barWidth * 0.40;
 
-        // Center line (0.0 correlation)
-        double centerBarX = barLeft + barWidth / 2.0;
-        context.DrawLine(new Pen(ReticleBrush, 1), new Point(centerBarX, barY - 2), new Point(centerBarX, barY + 12));
+        context.FillRectangle(CorrRedBrush, new Rect(barLeft, barY, redW, barH));
+        context.FillRectangle(CorrYellowBrush, new Rect(barLeft + redW, barY, yellowW, barH));
+        context.FillRectangle(CorrGreenBrush, new Rect(barLeft + redW + yellowW, barY, greenW, barH));
 
-        // Correlation indicator
+        // Correlation Cursor Tick
         double clampedCorr = Math.Clamp(Correlation, -1.0, 1.0);
-        double markerX = barLeft + ((clampedCorr + 1.0) / 2.0) * barWidth;
+        double cursorX = barLeft + ((clampedCorr + 1.0) / 2.0) * barWidth;
+        context.DrawLine(CursorPen, new Point(cursorX, barY - 4), new Point(cursorX, barY + barH + 4));
 
-        Color corrColor = clampedCorr switch
-        {
-            > 0.3 => Color.FromRgb(0, 230, 120),  // Green (good in-phase mono compatibility)
-            > 0.0 => Color.FromRgb(240, 200, 50),  // Yellow (acceptable stereo spread)
-            _ => Color.FromRgb(255, 60, 60)        // Red (anti-phase cancellation risk)
-        };
+        // Labels: -1 (Red), 0 (Yellow), +1 (Green)
+        DrawText(context, "-1", tf, 9, CorrRedBrush, barLeft, barY + barH + 2);
+        DrawCenteredText(context, "0", tf, 9, CorrYellowBrush, barLeft + redW + yellowW * 0.5, barY + barH + 2);
+        DrawTextRight(context, "+1", tf, 9, CorrGreenBrush, barRight, barY + barH + 2);
+    }
 
-        context.FillRectangle(new SolidColorBrush(corrColor), new Rect(Math.Min(centerBarX, markerX), barY, Math.Abs(markerX - centerBarX) + 1, 10));
+    private static void DrawText(DrawingContext ctx, string text, Typeface tf, double size, IBrush brush, double x, double y)
+    {
+        var ft = new FormattedText(text, CultureInfo.InvariantCulture, FlowDirection.LeftToRight, tf, size, brush);
+        ctx.DrawText(ft, new Point(x, y));
+    }
 
-        // Correlation labels: -1, 0, +1
-        DrawCenteredText(context, "-1", Typeface.Default, 8, LabelBrush, barLeft, barY + 11);
-        DrawCenteredText(context, "0", Typeface.Default, 8, LabelBrush, centerBarX, barY + 11);
-        DrawCenteredText(context, "+1", Typeface.Default, 8, LabelBrush, barLeft + barWidth, barY + 11);
+    private static void DrawTextRight(DrawingContext ctx, string text, Typeface tf, double size, IBrush brush, double rightX, double y)
+    {
+        var ft = new FormattedText(text, CultureInfo.InvariantCulture, FlowDirection.LeftToRight, tf, size, brush);
+        ctx.DrawText(ft, new Point(rightX - ft.Width, y));
     }
 
     private static void DrawCenteredText(DrawingContext ctx, string text, Typeface tf, double size, IBrush brush, double x, double y)

@@ -7,8 +7,9 @@ using Avalonia.Media;
 namespace MusicScope.Desktop.Controls;
 
 /// <summary>
-/// Hardware-accelerated custom control rendering the logarithmic frequency spectrum (20 Hz - 48+ kHz).
-/// Displays frequency grid, dBFS scale, and multi-curve spectrum.
+/// Linear Frequency Spectrum Control directly modeling the middle row of the MusicScope UI.
+/// Displays dB scale (0, -6, -12, -24, -40, -60, -96), glowing amber frequency curve,
+/// linear frequency axis with Nyquist ticks, and switches (Left/Right, Pano/Phase, -200dB Mode).
 /// </summary>
 public sealed class SpectrumGraphControl : Control
 {
@@ -30,21 +31,13 @@ public sealed class SpectrumGraphControl : Control
         set => SetValue(SampleRateProperty, value);
     }
 
-    private static readonly IBrush BackgroundBrush = new SolidColorBrush(Color.FromRgb(15, 18, 22));
-    private static readonly IBrush GridBrush = new SolidColorBrush(Color.FromArgb(40, 255, 255, 255));
-    private static readonly IBrush MajorGridBrush = new SolidColorBrush(Color.FromArgb(80, 255, 255, 255));
-    private static readonly IBrush TextBrush = new SolidColorBrush(Color.FromRgb(130, 145, 160));
-    private static readonly IPen CurvePen = new Pen(new SolidColorBrush(Color.FromRgb(0, 225, 255)), 1.5);
-    private static readonly IBrush CurveFillBrush = new LinearGradientBrush
-    {
-        StartPoint = new RelativePoint(0, 0, RelativeUnit.Relative),
-        EndPoint = new RelativePoint(0, 1, RelativeUnit.Relative),
-        GradientStops =
-        [
-            new GradientStop(Color.FromArgb(80, 0, 225, 255), 0.0),
-            new GradientStop(Color.FromArgb(5, 0, 100, 200), 1.0)
-        ]
-    };
+    private static readonly IBrush BgBrush = new SolidColorBrush(Color.FromRgb(0, 0, 0)); // Pure black
+    private static readonly IBrush GridBrush = new SolidColorBrush(Color.FromRgb(35, 40, 45)); // Dim grid line
+    private static readonly IBrush TextBrush = new SolidColorBrush(Color.FromRgb(200, 205, 210)); // Grid dB text
+    private static readonly IBrush GreenHeaderBrush = new SolidColorBrush(Color.FromRgb(0, 220, 0)); // Green "Linear Frequency Spectrum [kHz]"
+    private static readonly IBrush SwitchTextBrush = new SolidColorBrush(Color.FromRgb(120, 125, 130)); // Switch button text
+    private static readonly IPen SpectrumPen = new Pen(new SolidColorBrush(Color.FromRgb(255, 176, 0)), 1.2); // Amber curve
+    private static readonly IPen SpectrumGlowPen = new Pen(new SolidColorBrush(Color.FromArgb(90, 255, 160, 0)), 2.5);
 
     static SpectrumGraphControl()
     {
@@ -55,102 +48,106 @@ public sealed class SpectrumGraphControl : Control
     {
         double width = Bounds.Width;
         double height = Bounds.Height;
-        if (width < 20 || height < 20)
-            return;
+        if (width < 30 || height < 30) return;
 
-        // Background
-        context.FillRectangle(BackgroundBrush, new Rect(0, 0, width, height));
+        var tf = Typeface.Default;
+        context.FillRectangle(BgBrush, new Rect(0, 0, width, height));
 
-        const double minFreq = 20.0;
-        double maxFreq = SampleRate > 0 ? SampleRate / 2.0 : 22050.0;
-        const double minDb = -120.0;
-        const double maxDb = 0.0;
+        double topY = 16.0;
+        double bottomAxisY = height - 20.0;
+        double plotHeight = bottomAxisY - topY;
+        double leftMargin = 38.0;
+        double plotWidth = width - leftMargin - 10.0;
 
-        double logMin = Math.Log10(minFreq);
-        double logMax = Math.Log10(maxFreq);
-        double logRange = logMax - logMin;
+        // dB scale levels: 0, -6, -12, -24, -40, -60, -96
+        double[] dbMarks = [0.0, -6.0, -12.0, -24.0, -40.0, -60.0, -96.0];
 
-        // Draw horizontal dB grid lines (-100, -80, -60, -40, -20, 0 dB)
-        for (double db = -120; db <= 0; db += 20)
+        double DbToY(double db)
         {
-            double y = height * (1.0 - (db - minDb) / (maxDb - minDb));
-            context.DrawLine(new Pen(db == 0 ? MajorGridBrush : GridBrush, 1), new Point(0, y), new Point(width, y));
-
-            var ft = new FormattedText(
-                $"{db:0} dB",
-                CultureInfo.InvariantCulture,
-                FlowDirection.LeftToRight,
-                Typeface.Default,
-                10,
-                TextBrush);
-            context.DrawText(ft, new Point(4, y - 12));
+            // Segmented/non-linear dB mapping to give high resolution near peak levels:
+            // 0 dB -> topY, -96 dB -> bottomAxisY
+            double clamped = Math.Clamp(db, -96.0, 0.0);
+            double norm = Math.Pow(-clamped / 96.0, 0.7); // slight expansion near 0 dB
+            return topY + norm * plotHeight;
         }
 
-        // Draw vertical frequency grid lines (50, 100, 200, 500, 1k, 2k, 5k, 10k, 20k)
-        double[] freqLines = [50, 100, 200, 500, 1000, 2000, 5000, 10000, 20000];
-        foreach (double f in freqLines)
-        {
-            if (f > maxFreq) break;
-            double x = width * (Math.Log10(f) - logMin) / logRange;
-            context.DrawLine(new Pen(f is 100 or 1000 or 10000 ? MajorGridBrush : GridBrush, 1), new Point(x, 0), new Point(x, height));
+        // Draw "dB" header
+        DrawText(context, "dB", tf, 10, TextBrush, 8, topY - 12);
 
-            string label = f >= 1000 ? $"{f / 1000:0}k" : $"{f:0}";
-            var ft = new FormattedText(
-                label,
-                CultureInfo.InvariantCulture,
-                FlowDirection.LeftToRight,
-                Typeface.Default,
-                10,
-                TextBrush);
-            context.DrawText(ft, new Point(x + 2, height - 14));
+        // Draw horizontal grid lines & labels
+        for (int i = 0; i < dbMarks.Length; i++)
+        {
+            double db = dbMarks[i];
+            double y = DbToY(db);
+
+            context.DrawLine(new Pen(GridBrush, 1), new Point(leftMargin, y), new Point(leftMargin + plotWidth, y));
+            DrawTextRight(context, db.ToString("F0"), tf, 10, TextBrush, leftMargin - 4, y - 6);
         }
 
-        // Draw Spectrum Curve
+        // Bottom Axis Labels
+        // "Linear Frequency Spectrum [kHz]" in green
+        DrawText(context, "Linear Frequency Spectrum [kHz]", tf, 10, GreenHeaderBrush, leftMargin, bottomAxisY + 4);
+
+        // Frequency Ticks: fs/8, fs/4, 3fs/8, fs/2 (Nyquist)
+        double nyquistKhz = (SampleRate > 0 ? SampleRate : 44100.0) / 2000.0;
+        double f1 = nyquistKhz * 0.25;
+        double f2 = nyquistKhz * 0.50;
+        double f3 = nyquistKhz * 0.75;
+        double f4 = nyquistKhz;
+
+        double x1 = leftMargin + plotWidth * 0.25;
+        double x2 = leftMargin + plotWidth * 0.50;
+        double x3 = leftMargin + plotWidth * 0.75;
+        double x4 = leftMargin + plotWidth;
+
+        DrawCenteredText(context, f1.ToString("F2", CultureInfo.InvariantCulture), tf, 10, TextBrush, x1, bottomAxisY + 4);
+        DrawCenteredText(context, f2.ToString("F2", CultureInfo.InvariantCulture), tf, 10, TextBrush, x2, bottomAxisY + 4);
+        DrawCenteredText(context, f3.ToString("F2", CultureInfo.InvariantCulture), tf, 10, TextBrush, x3, bottomAxisY + 4);
+        DrawTextRight(context, f4.ToString("F2", CultureInfo.InvariantCulture), tf, 10, TextBrush, x4, bottomAxisY + 4);
+
+        // Switch Buttons / Annotations
+        DrawCenteredText(context, "Left/Right", tf, 9, SwitchTextBrush, leftMargin + plotWidth * 0.33, bottomAxisY + 4);
+        DrawCenteredText(context, "Pano/Phase", tf, 9, SwitchTextBrush, leftMargin + plotWidth * 0.42, bottomAxisY + 4);
+        DrawCenteredText(context, "-200dB Mode", tf, 9, SwitchTextBrush, leftMargin + plotWidth * 0.60, bottomAxisY + 4);
+
+        // Draw Frequency Spectrum Line
         double[]? mags = MagnitudesDb;
-        if (mags == null || mags.Length < 2)
-            return;
+        if (mags == null || mags.Length < 4) return;
 
         int binCount = mags.Length;
-        var geometry = new StreamGeometry();
-        using (var ctx = geometry.Open())
+        Point? prevPt = null;
+
+        for (int i = 0; i < binCount; i++)
         {
-            bool started = false;
-            Point firstPoint = default;
-            Point lastPoint = default;
+            double x = leftMargin + (i / (double)(binCount - 1)) * plotWidth;
+            double valDb = mags[i];
+            double y = DbToY(valDb);
 
-            for (int i = 1; i < binCount; i++)
+            var pt = new Point(x, y);
+            if (prevPt.HasValue)
             {
-                double f = i * (SampleRate / 2.0) / binCount;
-                if (f < minFreq) continue;
-                if (f > maxFreq) break;
-
-                double x = width * (Math.Log10(f) - logMin) / logRange;
-                double valDb = Math.Clamp(mags[i], minDb, maxDb);
-                double y = height * (1.0 - (valDb - minDb) / (maxDb - minDb));
-
-                var pt = new Point(x, y);
-                if (!started)
-                {
-                    ctx.BeginFigure(pt, isFilled: true);
-                    firstPoint = pt;
-                    started = true;
-                }
-                else
-                {
-                    ctx.LineTo(pt);
-                }
-                lastPoint = pt;
+                context.DrawLine(SpectrumGlowPen, prevPt.Value, pt);
+                context.DrawLine(SpectrumPen, prevPt.Value, pt);
             }
-
-            if (started)
-            {
-                // Close bottom for gradient fill
-                ctx.LineTo(new Point(lastPoint.X, height));
-                ctx.LineTo(new Point(firstPoint.X, height));
-                ctx.EndFigure(isClosed: true);
-            }
+            prevPt = pt;
         }
+    }
 
-        context.DrawGeometry(CurveFillBrush, CurvePen, geometry);
+    private static void DrawText(DrawingContext ctx, string text, Typeface tf, double size, IBrush brush, double x, double y)
+    {
+        var ft = new FormattedText(text, CultureInfo.InvariantCulture, FlowDirection.LeftToRight, tf, size, brush);
+        ctx.DrawText(ft, new Point(x, y));
+    }
+
+    private static void DrawTextRight(DrawingContext ctx, string text, Typeface tf, double size, IBrush brush, double rightX, double y)
+    {
+        var ft = new FormattedText(text, CultureInfo.InvariantCulture, FlowDirection.LeftToRight, tf, size, brush);
+        ctx.DrawText(ft, new Point(rightX - ft.Width, y));
+    }
+
+    private static void DrawCenteredText(DrawingContext ctx, string text, Typeface tf, double size, IBrush brush, double x, double y)
+    {
+        var ft = new FormattedText(text, CultureInfo.InvariantCulture, FlowDirection.LeftToRight, tf, size, brush);
+        ctx.DrawText(ft, new Point(x - ft.Width / 2.0, y));
     }
 }

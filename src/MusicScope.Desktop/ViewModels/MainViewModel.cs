@@ -35,6 +35,35 @@ public partial class MainViewModel : ViewModelBase
     [ObservableProperty]
     private double _analysisProgress;
 
+    // MusicScope Format Matrix
+    [ObservableProperty]
+    private string _formatName = "FLAC";
+
+    [ObservableProperty]
+    private int _bitDepth = 16;
+
+    [ObservableProperty]
+    private bool _isDsd;
+
+    [ObservableProperty]
+    private double _plr = 8.8;
+
+    [ObservableProperty]
+    private double _trackProgress = 0.0;
+
+    [ObservableProperty]
+    private double[] _peakHistory = InitializeHistory(-60.0);
+
+    [ObservableProperty]
+    private double[] _loudnessHistory = InitializeHistory(-60.0);
+
+    private static double[] InitializeHistory(double defaultDb)
+    {
+        double[] arr = new double[512];
+        Array.Fill(arr, defaultDb);
+        return arr;
+    }
+
     // Loudness metrics
     [ObservableProperty]
     private double _integratedLoudness = -70.0;
@@ -170,6 +199,9 @@ public partial class MainViewModel : ViewModelBase
 
         IsAnalyzing = true;
         AnalysisProgress = 0.0;
+        TrackProgress = 0.0;
+        PeakHistory = InitializeHistory(-60.0);
+        LoudnessHistory = InitializeHistory(-60.0);
         FilePath = path;
         TrackTitle = Path.GetFileNameWithoutExtension(path);
 
@@ -178,6 +210,11 @@ public partial class MainViewModel : ViewModelBase
             var info = await _decoder.ProbeAsync(path, ct);
             FormatDetails = $"{info.FormatName} | {info.SampleRate:0} Hz | {info.ChannelCount} Channels | {info.BitDepth}-bit | {info.Duration:mm\\:ss}";
             SampleRate = info.SampleRate;
+            FormatName = info.FormatName;
+            BitDepth = info.BitDepth;
+            IsDsd = info.FormatName.Contains("DSD", StringComparison.OrdinalIgnoreCase) ||
+                    info.FormatName.Contains("DSF", StringComparison.OrdinalIgnoreCase) ||
+                    info.FormatName.Contains("DFF", StringComparison.OrdinalIgnoreCase);
 
             var engine = new AudioAnalysisEngine(info.SampleRate, info.ChannelCount);
 
@@ -210,15 +247,21 @@ public partial class MainViewModel : ViewModelBase
         {
             IsAnalyzing = false;
             AnalysisProgress = 100.0;
+            TrackProgress = 1.0;
         }
     }
 
     private void UpdateFromSnapshot(AudioRealtimeSnapshot s)
     {
         AnalysisProgress = s.ProgressFraction * 100.0;
+        TrackProgress = s.ProgressFraction;
         IntegratedLoudness = s.RunningIntegratedLufs;
         MomentaryMax = s.MomentaryLufs;
         ShortTermMax = s.ShortTermLufs;
+        if (s.RunningLra > 0.0)
+        {
+            LoudnessRange = s.RunningLra;
+        }
 
         SamplePeakLeft = s.CurrentPeakLeftDb;
         SamplePeakRight = s.CurrentPeakRightDb;
@@ -227,6 +270,16 @@ public partial class MainViewModel : ViewModelBase
         RmsLeft = s.CurrentRmsLeftDb;
         RmsRight = s.CurrentRmsRightDb;
 
+        double currentMaxPeak = Math.Max(s.CurrentPeakLeftDb, s.CurrentPeakRightDb);
+        if (currentMaxPeak > -60.0 && s.RunningIntegratedLufs > -60.0)
+        {
+            Plr = Math.Max(0.0, currentMaxPeak - s.RunningIntegratedLufs);
+        }
+        if (s.CurrentPeakLeftDb > -60.0 && s.CurrentRmsLeftDb > -60.0)
+        {
+            CrestFactor = Math.Max(0.0, s.CurrentPeakLeftDb - s.CurrentRmsLeftDb);
+        }
+
         PhaseCorrelation = s.Correlation;
         MidLevel = s.MidLevelDb;
         SideLevel = s.SideLevelDb;
@@ -234,6 +287,10 @@ public partial class MainViewModel : ViewModelBase
         SpectrumMagnitudes = s.InstantSpectrumDb;
         GoniometerPointsX = s.GoniometerPointsX;
         GoniometerPointsY = s.GoniometerPointsY;
+
+        int histIdx = Math.Clamp((int)(s.ProgressFraction * 511.0), 0, 511);
+        PeakHistory[histIdx] = currentMaxPeak;
+        LoudnessHistory[histIdx] = s.MomentaryLufs;
     }
 
     [RelayCommand]
@@ -289,11 +346,13 @@ public partial class MainViewModel : ViewModelBase
         RmsRight = r.Levels.RmsRightDb;
         CrestFactor = r.Levels.CrestFactorDb;
         DynamicRange = r.Levels.DynamicRangeDb;
+        Plr = Math.Max(0.0, Math.Max(r.Levels.TruePeakLeftDb, r.Levels.TruePeakRightDb) - r.Loudness.IntegratedLoudness);
 
         PhaseCorrelation = r.Stereo.Correlation;
         MidLevel = r.Stereo.MidLevelDb;
         SideLevel = r.Stereo.SideLevelDb;
 
         SpectrumMagnitudes = r.SpectrumMagnitudesDb;
+        TrackProgress = 1.0;
     }
 }
