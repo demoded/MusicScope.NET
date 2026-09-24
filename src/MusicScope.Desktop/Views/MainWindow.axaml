@@ -9,8 +9,8 @@
         x:DataType="vm:MainViewModel"
         Background="#000000"
         Foreground="#E2E8F0"
-        MinWidth="960" MinHeight="600"
-        Width="1200" Height="780"
+        MinWidth="960" MinHeight="700"
+        Width="1200" Height="920"
         WindowStartupLocation="CenterScreen"
         Title="MusicScope.NET - High Resolution Audio Analyzer">
 
@@ -64,7 +64,7 @@
         <TabControl Grid.Row="1" Background="#000000" Padding="0" Margin="0">
             <!-- TAB 1: Authentic MusicScope Analyzer -->
             <TabItem Header="MusicScope" FontSize="12" FontWeight="SemiBold">
-                <Grid RowDefinitions="275,*,170" Background="#000000">
+                <Grid RowDefinitions="275,*,340" Background="#000000">
                     <!-- Row 0: Top 5 Boxes -->
                     <Grid Grid.Row="0" ColumnDefinitions="1.1*,1.4*,1.1*,1.6*,1.6*" Background="#000000">
                         <!-- Box 1: Format Matrix -->

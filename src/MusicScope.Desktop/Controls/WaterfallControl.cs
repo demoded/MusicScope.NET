@@ -34,7 +34,7 @@ public sealed class WaterfallControl : Control
     }
 
     private const int BitmapWidth = 512;
-    private const int BitmapHeight = 160;
+    private const int BitmapHeight = 320;
     private readonly WriteableBitmap _bitmap;
     private int _lastRenderedRow = -1;
 
