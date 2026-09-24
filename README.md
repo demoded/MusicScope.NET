@@ -2,7 +2,7 @@
 
 A modern, high-precision, cross-platform audio analyzer and acoustic measurement suite built on **.NET 10** and **AvaloniaUI 12**.
 
-Reverse-engineered and modernized from the legacy **XiVero MusicScope** audio analyzer, re-implemented from the ground up as a clean, local-first, open-source desktop application targeting **Windows**, **macOS** (Apple Silicon & Intel), and **Linux**.
+This project is a complete modern rewrite of the original **XiVideo MusicScope v.2.1.0** (XiVero) audio analyzer, re-implemented from the ground up as a clean, local-first, open-source desktop application targeting **Windows**, **macOS** (Apple Silicon & Intel), and **Linux**.
 
 ---
 
