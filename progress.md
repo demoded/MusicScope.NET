@@ -5,6 +5,7 @@ This document records the step-by-step progress of reverse engineering the legac
 ---
 
 ## Project Overview
+* **Repository**: [https://github.com/demoded/MusicScope.NET](https://github.com/demoded/MusicScope.NET)
 * **Legacy Application**: XiVero MusicScope (High Resolution Audio Analyzer, package `com.xivero.hraa`).
 * **Source Location**: `OriginalJavaApp/` (contained `MusicScope.exe`, 34 library `.jar` files, and bundled Java 8 JRE).
 * **Target Stack**:
