@@ -206,5 +206,31 @@ This document records the step-by-step progress of reverse engineering the legac
     * Real-time radial history recording and auto-clearing waterfall on new file decode.
 * **Verification**: Solution compiles with **0 warnings and 0 errors**; all unit & benchmark tests pass.
 
+---
+
+### Phase 11: Cumulative Peak Hold Spectrum Alignment with Original MusicScope Engine
+* **Status**: [COMPLETED]
+* **Problem**: The .NET rewrite was displaying an average power spectrum across the entire track upon completion, which washed out transient musical peaks and dropped high frequencies into the -96 dB floor. The original MusicScope UI (`OrigianlJavaApp/frequency_graph_OriginalUI.png`) displays the **cumulative peak hold data** (`AlacUtils` in decompiled `SpectrumControl.java`).
+* **Root Cause & Decompilation Findings**:
+  * In `SpectrumControl.java` (lines 390–400), MusicScope maintains `AlacUtils[n]`: on every FFT block, it evaluates `if (AlacUtils[n] < binMag) AlacUtils[n] = binMag`.
+  * During playback, it paints a green vertical line for instantaneous level (`FlacAudioCodec`), and on top renders an amber peak curve (`#FFBF00`) at the cumulative peak `AlacUtils[n]`.
+  * When analysis completes, the amber cumulative peak envelope remains held across all frequency bins, preserving transients, harmonics, and full high-frequency frequency response out to Nyquist.
+* **Key Improvements Implemented**:
+  * [x] **`AudioAnalysisEngine.cs`**:
+    * Added `_peakHoldSpectrumDb` array tracking peak hold across all 1024 bins (`FftSize = 2048`).
+    * Configured continuous 2048-frame FFT coverage so no audio transients or percussion bursts are missed.
+    * Integrated Blackman-Harris coherent gain normalization ($2.0 / (N \times 0.35875)$) so a 0 dBFS sine wave peaks accurately at 0 dBFS.
+    * Both `GetRealtimeSnapshot` and `GenerateReport` output the cumulative peak hold spectrum (`CumulativePeakSpectrumDb` / `SpectrumMagnitudesDb`).
+  * [x] **`MainViewModel.cs`**:
+    * Added `InstantSpectrumMagnitudes` for live waterfall slice rendering and green real-time bouncing.
+    * Bound `SpectrumMagnitudes` to the cumulative peak hold data across the whole track.
+  * [x] **`SpectrumGraphControl.cs`**:
+    * Implemented MusicScope's exact mathematical logarithmic dB to Y mapping:
+      $y = \text{bottomAxisY} - \text{plotHeight} \cdot \frac{\log_{10}(10^{\text{dB}/20} \cdot 3000 + 1)}{\log_{10}(3001)}$
+    * Added bright neon green horizontal baseline (`#00FF00`, 2px thick) across the bottom axis with 5px Nyquist tick marks (`5.51`, `11.03`, `16.54`, `22.05` kHz).
+    * Rendered the cumulative peak curve in the authentic golden amber `#FFBF00`.
+* **Verification**: Solution compiles with **0 warnings and 0 errors**; all 9 unit & benchmark tests pass.
+
+
 
 

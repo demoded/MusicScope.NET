@@ -31,8 +31,9 @@ public record AudioRealtimeSnapshot
     public double MidLevelDb { get; init; } = -100.0;
     public double SideLevelDb { get; init; } = -100.0;
 
-    // Spectrum curve (latest FFT magnitude array)
+    // Spectrum curves
     public double[]? InstantSpectrumDb { get; init; }
+    public double[]? CumulativePeakSpectrumDb { get; init; }
 
     // Goniometer vector points for phosphor scope
     public float[]? GoniometerPointsX { get; init; }

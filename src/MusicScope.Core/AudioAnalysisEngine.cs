@@ -22,13 +22,14 @@ public sealed class AudioAnalysisEngine
     private readonly FastFourierTransform _fft;
     private readonly double[] _fftWindow;
 
-    private const int FftSize = 4096;
-    private const int FftStride = 8192; // Compute FFT every 8192 audio frames (~185ms)
+    private const int FftSize = 2048;
+    private const int FftStride = 2048; // Compute FFT every 2048 audio frames (~46ms at 44.1kHz)
     private int _framesSinceLastFft;
     private readonly double[] _fftRealBuffer = new double[FftSize];
     private readonly double[] _fftImagBuffer = new double[FftSize];
     private readonly double[] _accumulatedSpectrum = new double[FftSize / 2];
     private readonly double[] _latestInstantSpectrumDb = new double[FftSize / 2];
+    private readonly double[] _peakHoldSpectrumDb = new double[FftSize / 2];
     private int _spectrumFftCount;
 
     private readonly float[] _lastInterleavedBlock = new float[1024];
@@ -48,6 +49,7 @@ public sealed class AudioAnalysisEngine
         _fft = new FastFourierTransform(FftSize);
         _fftWindow = WindowFunctions.Create(WindowType.BlackmanHarris, FftSize);
         Array.Fill(_latestInstantSpectrumDb, -140.0);
+        Array.Fill(_peakHoldSpectrumDb, -140.0);
     }
 
     /// <summary>
@@ -93,8 +95,8 @@ public sealed class AudioAnalysisEngine
 
                 _fft.Forward(_fftRealBuffer, _fftImagBuffer);
 
-                // Accumulate power spectrum and update instant spectrum
-                double scale = 2.0 / FftSize;
+                // Blackman-Harris coherent gain is 0.35875
+                double scale = 2.0 / (FftSize * 0.35875);
                 for (int b = 0; b < FftSize / 2; b++)
                 {
                     double magSq = _fftRealBuffer[b] * _fftRealBuffer[b] + _fftImagBuffer[b] * _fftImagBuffer[b];
@@ -102,8 +104,15 @@ public sealed class AudioAnalysisEngine
 
                     double instantMag = Math.Sqrt(magSq) * scale;
                     double instantDb = instantMag > 1e-7 ? Math.Max(-140.0, 20.0 * Math.Log10(instantMag)) : -140.0;
-                    // Exponential decay smoothing for spectrum display
+                    
+                    // Instantaneous smoothed display for live dancing
                     _latestInstantSpectrumDb[b] = _latestInstantSpectrumDb[b] * 0.4 + instantDb * 0.6;
+
+                    // Cumulative peak hold across the entire track
+                    if (instantDb > _peakHoldSpectrumDb[b])
+                    {
+                        _peakHoldSpectrumDb[b] = instantDb;
+                    }
                 }
                 _spectrumFftCount++;
                 i += FftSize - 1; // Advance past this FFT frame
@@ -118,6 +127,9 @@ public sealed class AudioAnalysisEngine
     {
         double[] spectrumCopy = new double[FftSize / 2];
         Array.Copy(_latestInstantSpectrumDb, spectrumCopy, spectrumCopy.Length);
+
+        double[] peakHoldCopy = new double[FftSize / 2];
+        Array.Copy(_peakHoldSpectrumDb, peakHoldCopy, peakHoldCopy.Length);
 
         float[] gonioX = new float[_goniometerX.Length];
         float[] gonioY = new float[_goniometerY.Length];
@@ -144,6 +156,7 @@ public sealed class AudioAnalysisEngine
             MaxTruePeakRightDb = _truePeakMeter.MaxTruePeakRightDb,
             Correlation = _stereoAnalyzer.RealtimeCorrelation,
             InstantSpectrumDb = spectrumCopy,
+            CumulativePeakSpectrumDb = peakHoldCopy,
             GoniometerPointsX = gonioX,
             GoniometerPointsY = gonioY
         };
@@ -158,15 +171,9 @@ public sealed class AudioAnalysisEngine
         var levelsResult = _truePeakMeter.CalculateResult();
         var stereoResult = _channelCount >= 2 ? _stereoAnalyzer.CalculateResult() : new StereoResult();
 
+        // MusicScope displays the full cumulative peak hold spectrum across the entire track
         double[] finalSpectrumDb = new double[FftSize / 2];
-        double scale = _spectrumFftCount > 0 ? 1.0 / _spectrumFftCount : 1.0;
-        double normScale = 2.0 / FftSize;
-
-        for (int b = 0; b < FftSize / 2; b++)
-        {
-            double avgMag = Math.Sqrt(_accumulatedSpectrum[b] * scale) * normScale;
-            finalSpectrumDb[b] = avgMag > 1e-7 ? Math.Max(-140.0, 20.0 * Math.Log10(avgMag)) : -140.0;
-        }
+        Array.Copy(_peakHoldSpectrumDb, finalSpectrumDb, finalSpectrumDb.Length);
 
         return new FullAnalysisReport
         {
@@ -193,6 +200,8 @@ public sealed class AudioAnalysisEngine
         _truePeakMeter.Reset();
         _stereoAnalyzer.Reset();
         Array.Clear(_accumulatedSpectrum, 0, _accumulatedSpectrum.Length);
+        Array.Fill(_peakHoldSpectrumDb, -140.0);
+        Array.Fill(_latestInstantSpectrumDb, -140.0);
         _spectrumFftCount = 0;
     }
 }

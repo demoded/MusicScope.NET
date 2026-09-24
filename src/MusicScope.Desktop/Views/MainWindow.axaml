@@ -118,12 +118,13 @@
                     <!-- Row 1: Linear Frequency Spectrum [kHz] -->
                     <Border Grid.Row="1" BorderBrush="#1C2127" BorderThickness="0,0,0,1" Background="#000000">
                         <ctrl:SpectrumGraphControl MagnitudesDb="{Binding SpectrumMagnitudes}"
+                                                   InstantMagnitudesDb="{Binding InstantSpectrumMagnitudes}"
                                                    SampleRate="{Binding SampleRate}"/>
                     </Border>
 
                     <!-- Row 2: 2D Waterfall / Spectrogram Heatmap -->
                     <Border Grid.Row="2" Background="#000000">
-                        <ctrl:WaterfallControl LatestSpectrum="{Binding SpectrumMagnitudes}"
+                        <ctrl:WaterfallControl LatestSpectrum="{Binding InstantSpectrumMagnitudes}"
                                                TrackProgress="{Binding TrackProgress}"/>
                     </Border>
                 </Grid>

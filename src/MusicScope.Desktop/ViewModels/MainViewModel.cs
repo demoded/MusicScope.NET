@@ -117,6 +117,9 @@ public partial class MainViewModel : ViewModelBase
     private double[]? _spectrumMagnitudes;
 
     [ObservableProperty]
+    private double[]? _instantSpectrumMagnitudes;
+
+    [ObservableProperty]
     private float[]? _goniometerPointsX;
 
     [ObservableProperty]
@@ -284,7 +287,8 @@ public partial class MainViewModel : ViewModelBase
         MidLevel = s.MidLevelDb;
         SideLevel = s.SideLevelDb;
 
-        SpectrumMagnitudes = s.InstantSpectrumDb;
+        SpectrumMagnitudes = s.CumulativePeakSpectrumDb ?? s.InstantSpectrumDb;
+        InstantSpectrumMagnitudes = s.InstantSpectrumDb;
         GoniometerPointsX = s.GoniometerPointsX;
         GoniometerPointsY = s.GoniometerPointsY;
 
