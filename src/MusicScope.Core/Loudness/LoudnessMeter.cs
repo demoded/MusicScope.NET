@@ -22,11 +22,14 @@ public sealed class LoudnessMeter
     private readonly int _samplesPerStep100ms;
     private readonly int _blocksPerShortTerm3s = 30; // 3000 ms / 100 ms = 30 blocks
 
-    // Rolling ring buffer for current block (400ms)
-    private readonly double[][] _blockRingBuffer;
-    private int _ringBufferPos;
+    // Rolling sub-blocks (4 sub-blocks of 100ms = 400ms momentary window)
+    private readonly double[] _current100msEnergy;
+    private readonly double[][] _subBlockMeanSquares;
+    private int _subBlockRingIdx;
+    private int _totalSubBlocksProcessed;
     private int _samplesSinceLastStep;
     private long _totalSamplesProcessed;
+    private double _shortTermRunningSum;
 
     // Power history of 400ms blocks: each entry is weighted sum of mean square powers
     private readonly List<double> _blockPowers400ms = [];
@@ -67,10 +70,11 @@ public sealed class LoudnessMeter
                 _channelWeights[i] = 1.0; // Left, Right, Center default 1.0
         }
 
-        _blockRingBuffer = new double[channelCount][];
+        _current100msEnergy = new double[channelCount];
+        _subBlockMeanSquares = new double[channelCount][];
         for (int i = 0; i < channelCount; i++)
         {
-            _blockRingBuffer[i] = new double[_samplesPerBlock400ms];
+            _subBlockMeanSquares[i] = new double[4];
         }
     }
 
@@ -80,24 +84,47 @@ public sealed class LoudnessMeter
     public void ProcessInterleaved(ReadOnlySpan<double> samples)
     {
         int frameCount = samples.Length / _channelCount;
-        for (int frame = 0; frame < frameCount; frame++)
+        if (_channelCount == 2)
         {
-            int baseIdx = frame * _channelCount;
-            for (int ch = 0; ch < _channelCount; ch++)
+            for (int frame = 0; frame < frameCount; frame++)
             {
-                double raw = samples[baseIdx + ch];
-                double filtered = _filter.ProcessSample(ch, raw);
-                _blockRingBuffer[ch][_ringBufferPos] = filtered;
+                double rawL = samples[frame * 2];
+                double rawR = samples[frame * 2 + 1];
+
+                _filter.ProcessStereoSample(rawL, rawR, out double filteredL, out double filteredR);
+
+                _current100msEnergy[0] += filteredL * filteredL;
+                _current100msEnergy[1] += filteredR * filteredR;
+                _samplesSinceLastStep++;
+                _totalSamplesProcessed++;
+
+                if (_samplesSinceLastStep >= _samplesPerStep100ms)
+                {
+                    _samplesSinceLastStep = 0;
+                    EvaluateSubBlock();
+                }
             }
-
-            _ringBufferPos = (_ringBufferPos + 1) % _samplesPerBlock400ms;
-            _samplesSinceLastStep++;
-            _totalSamplesProcessed++;
-
-            if (_samplesSinceLastStep >= _samplesPerStep100ms)
+        }
+        else
+        {
+            for (int frame = 0; frame < frameCount; frame++)
             {
-                _samplesSinceLastStep = 0;
-                EvaluateStep();
+                int baseIdx = frame * _channelCount;
+                for (int ch = 0; ch < _channelCount; ch++)
+                {
+                    double raw = samples[baseIdx + ch];
+                    double filtered = _filter.ProcessSample(ch, raw);
+                    _current100msEnergy[ch] += filtered * filtered;
+                }
+
+                _samplesSinceLastStep++;
+                _totalSamplesProcessed++;
+
+                if (_samplesSinceLastStep >= _samplesPerStep100ms)
+                {
+                    _samplesSinceLastStep = 0;
+                    EvaluateSubBlock();
+                }
             }
         }
     }
@@ -108,46 +135,73 @@ public sealed class LoudnessMeter
     public void ProcessInterleaved(ReadOnlySpan<float> samples)
     {
         int frameCount = samples.Length / _channelCount;
-        for (int frame = 0; frame < frameCount; frame++)
+        if (_channelCount == 2)
         {
-            int baseIdx = frame * _channelCount;
-            for (int ch = 0; ch < _channelCount; ch++)
+            for (int frame = 0; frame < frameCount; frame++)
             {
-                double raw = samples[baseIdx + ch];
-                double filtered = _filter.ProcessSample(ch, raw);
-                _blockRingBuffer[ch][_ringBufferPos] = filtered;
+                float rawL = samples[frame * 2];
+                float rawR = samples[frame * 2 + 1];
+
+                _filter.ProcessStereoSample(rawL, rawR, out double filteredL, out double filteredR);
+
+                _current100msEnergy[0] += filteredL * filteredL;
+                _current100msEnergy[1] += filteredR * filteredR;
+                _samplesSinceLastStep++;
+                _totalSamplesProcessed++;
+
+                if (_samplesSinceLastStep >= _samplesPerStep100ms)
+                {
+                    _samplesSinceLastStep = 0;
+                    EvaluateSubBlock();
+                }
             }
-
-            _ringBufferPos = (_ringBufferPos + 1) % _samplesPerBlock400ms;
-            _samplesSinceLastStep++;
-            _totalSamplesProcessed++;
-
-            if (_samplesSinceLastStep >= _samplesPerStep100ms)
+        }
+        else
+        {
+            for (int frame = 0; frame < frameCount; frame++)
             {
-                _samplesSinceLastStep = 0;
-                EvaluateStep();
+                int baseIdx = frame * _channelCount;
+                for (int ch = 0; ch < _channelCount; ch++)
+                {
+                    double raw = samples[baseIdx + ch];
+                    double filtered = _filter.ProcessSample(ch, raw);
+                    _current100msEnergy[ch] += filtered * filtered;
+                }
+
+                _samplesSinceLastStep++;
+                _totalSamplesProcessed++;
+
+                if (_samplesSinceLastStep >= _samplesPerStep100ms)
+                {
+                    _samplesSinceLastStep = 0;
+                    EvaluateSubBlock();
+                }
             }
         }
     }
 
-    private void EvaluateStep()
+    private void EvaluateSubBlock()
     {
-        // Don't compute until we have at least one full 400ms block
-        if (_totalSamplesProcessed < _samplesPerBlock400ms)
+        for (int ch = 0; ch < _channelCount; ch++)
+        {
+            _subBlockMeanSquares[ch][_subBlockRingIdx] = _current100msEnergy[ch] / _samplesPerStep100ms;
+            _current100msEnergy[ch] = 0.0;
+        }
+
+        _subBlockRingIdx = (_subBlockRingIdx + 1) & 3;
+        _totalSubBlocksProcessed++;
+
+        // Don't compute until we have 4 full sub-blocks (400ms)
+        if (_totalSubBlocksProcessed < 4)
             return;
 
-        // Calculate mean square power over the 400ms buffer for each channel
         double weightedSumOfPowers = 0.0;
         for (int ch = 0; ch < _channelCount; ch++)
         {
-            double chSumSq = 0.0;
-            double[] chBuf = _blockRingBuffer[ch];
-            for (int i = 0; i < _samplesPerBlock400ms; i++)
-            {
-                double s = chBuf[i];
-                chSumSq += s * s;
-            }
-            double meanSquare = chSumSq / _samplesPerBlock400ms;
+            double meanSquare = (_subBlockMeanSquares[ch][0] +
+                                 _subBlockMeanSquares[ch][1] +
+                                 _subBlockMeanSquares[ch][2] +
+                                 _subBlockMeanSquares[ch][3]) * 0.25;
             weightedSumOfPowers += _channelWeights[ch] * meanSquare;
         }
 
@@ -161,16 +215,15 @@ public sealed class LoudnessMeter
         if (_currentMomentaryLufs > _momentaryMax)
             _momentaryMax = _currentMomentaryLufs;
 
-        // Short-term Loudness (last 3 seconds = 30 steps of 100ms)
+        // Short-term Loudness (last 3 seconds = 30 steps of 100ms) with running sum
+        _shortTermRunningSum += weightedSumOfPowers;
         if (_blockPowers400ms.Count >= _blocksPerShortTerm3s)
         {
-            int startIdx = _blockPowers400ms.Count - _blocksPerShortTerm3s;
-            double shortTermPowerSum = 0.0;
-            for (int i = startIdx; i < _blockPowers400ms.Count; i++)
+            if (_blockPowers400ms.Count > _blocksPerShortTerm3s)
             {
-                shortTermPowerSum += _blockPowers400ms[i];
+                _shortTermRunningSum -= _blockPowers400ms[_blockPowers400ms.Count - 1 - _blocksPerShortTerm3s];
             }
-            double shortTermAvgPower = shortTermPowerSum / _blocksPerShortTerm3s;
+            double shortTermAvgPower = _shortTermRunningSum / _blocksPerShortTerm3s;
             _currentShortTermLufs = shortTermAvgPower > 0.0
                 ? -0.691 + 10.0 * Math.Log10(shortTermAvgPower)
                 : -70.0;
@@ -182,7 +235,11 @@ public sealed class LoudnessMeter
         }
         else
         {
-            _currentShortTermLufs = _currentMomentaryLufs;
+            double shortTermAvgPower = _shortTermRunningSum / _blockPowers400ms.Count;
+            _currentShortTermLufs = shortTermAvgPower > 0.0
+                ? -0.691 + 10.0 * Math.Log10(shortTermAvgPower)
+                : -70.0;
+
             if (_currentShortTermLufs > _shortTermMax)
                 _shortTermMax = _currentShortTermLufs;
         }
@@ -291,9 +348,11 @@ public sealed class LoudnessMeter
     public void Reset()
     {
         _filter.Reset();
-        _ringBufferPos = 0;
+        _subBlockRingIdx = 0;
+        _totalSubBlocksProcessed = 0;
         _samplesSinceLastStep = 0;
         _totalSamplesProcessed = 0;
+        _shortTermRunningSum = 0.0;
         _blockPowers400ms.Clear();
         _shortTermLoudnessHistory.Clear();
         _currentMomentaryLufs = -70.0;
@@ -303,7 +362,8 @@ public sealed class LoudnessMeter
 
         for (int ch = 0; ch < _channelCount; ch++)
         {
-            Array.Clear(_blockRingBuffer[ch], 0, _blockRingBuffer[ch].Length);
+            _current100msEnergy[ch] = 0.0;
+            Array.Clear(_subBlockMeanSquares[ch], 0, 4);
         }
     }
 }

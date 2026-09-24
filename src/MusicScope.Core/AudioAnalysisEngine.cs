@@ -23,12 +23,16 @@ public sealed class AudioAnalysisEngine
     private readonly double[] _fftWindow;
 
     private const int FftSize = 4096;
+    private const int FftStride = 8192; // Compute FFT every 8192 audio frames (~185ms)
+    private int _framesSinceLastFft;
     private readonly double[] _fftRealBuffer = new double[FftSize];
     private readonly double[] _fftImagBuffer = new double[FftSize];
     private readonly double[] _accumulatedSpectrum = new double[FftSize / 2];
     private readonly double[] _latestInstantSpectrumDb = new double[FftSize / 2];
     private int _spectrumFftCount;
 
+    private readonly float[] _lastInterleavedBlock = new float[1024];
+    private int _lastInterleavedCount;
     private readonly float[] _goniometerX = new float[256];
     private readonly float[] _goniometerY = new float[256];
 
@@ -57,46 +61,53 @@ public sealed class AudioAnalysisEngine
         if (_channelCount >= 2)
         {
             _stereoAnalyzer.ProcessInterleaved(interleavedSamples);
-            _stereoAnalyzer.GenerateGoniometerPoints(interleavedSamples, _goniometerX, _goniometerY);
+
+            // Cache latest samples for on-demand goniometer calculation
+            int copyLen = Math.Min(interleavedSamples.Length, _lastInterleavedBlock.Length);
+            interleavedSamples.Slice(0, copyLen).CopyTo(_lastInterleavedBlock);
+            _lastInterleavedCount = copyLen;
         }
 
         // Perform periodic FFT on mono downmix
         int frameCount = interleavedSamples.Length / _channelCount;
-        for (int i = 0; i < frameCount; i += FftSize)
+        for (int i = 0; i < frameCount; i++)
         {
-            int blockLen = Math.Min(FftSize, frameCount - i);
-            if (blockLen < FftSize)
-                break;
-
-            for (int k = 0; k < FftSize; k++)
+            _framesSinceLastFft++;
+            if (_framesSinceLastFft >= FftStride && (i + FftSize) <= frameCount)
             {
-                int sampleIdx = (i + k) * _channelCount;
-                float mono = 0f;
-                for (int ch = 0; ch < _channelCount; ch++)
+                _framesSinceLastFft = 0;
+
+                for (int k = 0; k < FftSize; k++)
                 {
-                    mono += interleavedSamples[sampleIdx + ch];
+                    int sampleIdx = (i + k) * _channelCount;
+                    float mono = 0f;
+                    for (int ch = 0; ch < _channelCount; ch++)
+                    {
+                        mono += interleavedSamples[sampleIdx + ch];
+                    }
+                    mono /= _channelCount;
+
+                    _fftRealBuffer[k] = mono * _fftWindow[k];
+                    _fftImagBuffer[k] = 0.0;
                 }
-                mono /= _channelCount;
 
-                _fftRealBuffer[k] = mono * _fftWindow[k];
-                _fftImagBuffer[k] = 0.0;
+                _fft.Forward(_fftRealBuffer, _fftImagBuffer);
+
+                // Accumulate power spectrum and update instant spectrum
+                double scale = 2.0 / FftSize;
+                for (int b = 0; b < FftSize / 2; b++)
+                {
+                    double magSq = _fftRealBuffer[b] * _fftRealBuffer[b] + _fftImagBuffer[b] * _fftImagBuffer[b];
+                    _accumulatedSpectrum[b] += magSq;
+
+                    double instantMag = Math.Sqrt(magSq) * scale;
+                    double instantDb = instantMag > 1e-7 ? Math.Max(-140.0, 20.0 * Math.Log10(instantMag)) : -140.0;
+                    // Exponential decay smoothing for spectrum display
+                    _latestInstantSpectrumDb[b] = _latestInstantSpectrumDb[b] * 0.4 + instantDb * 0.6;
+                }
+                _spectrumFftCount++;
+                i += FftSize - 1; // Advance past this FFT frame
             }
-
-            _fft.Forward(_fftRealBuffer, _fftImagBuffer);
-
-            // Accumulate power spectrum and update instant spectrum
-            double scale = 2.0 / FftSize;
-            for (int b = 0; b < FftSize / 2; b++)
-            {
-                double magSq = _fftRealBuffer[b] * _fftRealBuffer[b] + _fftImagBuffer[b] * _fftImagBuffer[b];
-                _accumulatedSpectrum[b] += magSq;
-
-                double instantMag = Math.Sqrt(magSq) * scale;
-                double instantDb = instantMag > 1e-7 ? Math.Max(-140.0, 20.0 * Math.Log10(instantMag)) : -140.0;
-                // Exponential decay smoothing for spectrum display
-                _latestInstantSpectrumDb[b] = _latestInstantSpectrumDb[b] * 0.4 + instantDb * 0.6;
-            }
-            _spectrumFftCount++;
         }
     }
 
@@ -110,6 +121,12 @@ public sealed class AudioAnalysisEngine
 
         float[] gonioX = new float[_goniometerX.Length];
         float[] gonioY = new float[_goniometerY.Length];
+
+        if (_channelCount >= 2 && _lastInterleavedCount > 0)
+        {
+            _stereoAnalyzer.GenerateGoniometerPoints(_lastInterleavedBlock.AsSpan(0, _lastInterleavedCount), _goniometerX, _goniometerY);
+        }
+
         Array.Copy(_goniometerX, gonioX, gonioX.Length);
         Array.Copy(_goniometerY, gonioY, gonioY.Length);
 

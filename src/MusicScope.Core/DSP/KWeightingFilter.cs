@@ -94,11 +94,9 @@ public sealed class KWeightingFilter
     /// <summary>
     /// Processes a single sample for a specific channel through the cascaded K-weighting filters.
     /// </summary>
+    [System.Runtime.CompilerServices.MethodImpl(System.Runtime.CompilerServices.MethodImplOptions.AggressiveInlining)]
     public double ProcessSample(int channel, double input)
     {
-        if ((uint)channel >= (uint)_channelCount)
-            throw new ArgumentOutOfRangeException(nameof(channel));
-
         // Stage 1: High-shelf filter (Direct Form II Transposed)
         double stage1Out = _s1B0 * input + _s1D1[channel];
         _s1D1[channel] = _s1B1 * input - _s1A1 * stage1Out + _s1D2[channel];
@@ -110,6 +108,33 @@ public sealed class KWeightingFilter
         _s2D2[channel] = _s2B2 * stage1Out - _s2A2 * stage2Out;
 
         return stage2Out;
+    }
+
+    /// <summary>
+    /// Fast inlined stereo K-weighting filter avoiding array index and bounds overhead.
+    /// </summary>
+    [System.Runtime.CompilerServices.MethodImpl(System.Runtime.CompilerServices.MethodImplOptions.AggressiveInlining)]
+    public void ProcessStereoSample(double inL, double inR, out double outL, out double outR)
+    {
+        // Stage 1: Left
+        double s1OutL = _s1B0 * inL + _s1D1[0];
+        _s1D1[0] = _s1B1 * inL - _s1A1 * s1OutL + _s1D2[0];
+        _s1D2[0] = _s1B2 * inL - _s1A2 * s1OutL;
+
+        // Stage 2: Left
+        outL = _s2B0 * s1OutL + _s2D1[0];
+        _s2D1[0] = _s2B1 * s1OutL - _s2A1 * outL + _s2D2[0];
+        _s2D2[0] = _s2B2 * s1OutL - _s2A2 * outL;
+
+        // Stage 1: Right
+        double s1OutR = _s1B0 * inR + _s1D1[1];
+        _s1D1[1] = _s1B1 * inR - _s1A1 * s1OutR + _s1D2[1];
+        _s1D2[1] = _s1B2 * inR - _s1A2 * s1OutR;
+
+        // Stage 2: Right
+        outR = _s2B0 * s1OutR + _s2D1[1];
+        _s2D1[1] = _s2B1 * s1OutR - _s2A1 * outR + _s2D2[1];
+        _s2D2[1] = _s2B2 * s1OutR - _s2A2 * outR;
     }
 
     /// <summary>

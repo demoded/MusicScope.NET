@@ -144,9 +144,10 @@ public sealed class FfmpegAudioDecoder : IAudioDecoder
         using var process = new Process { StartInfo = psi };
         process.Start();
 
-        const int floatBufferSize = 8192; // 8192 float samples per chunk
+        const int floatBufferSize = 65536; // 65,536 float samples = 256 KB per chunk
         int byteBufferSize = floatBufferSize * sizeof(float);
-        byte[] rawBuffer = new byte[byteBufferSize];
+        byte[] rawBuffer = System.Buffers.ArrayPool<byte>.Shared.Rent(byteBufferSize);
+        float[] floatBuffer = System.Buffers.ArrayPool<float>.Shared.Rent(floatBufferSize);
 
         Stream stdout = process.StandardOutput.BaseStream;
         long totalSamplesRead = 0;
@@ -161,15 +162,14 @@ public sealed class FfmpegAudioDecoder : IAudioDecoder
                 if (floatCount == 0)
                     continue;
 
-                float[] floatArray = new float[floatCount];
-                Buffer.BlockCopy(rawBuffer, 0, floatArray, 0, bytesRead);
+                Buffer.BlockCopy(rawBuffer, 0, floatBuffer, 0, floatCount * sizeof(float));
 
                 totalSamplesRead += floatCount;
                 double progress = expectedTotalSamples > 0 
                     ? Math.Min(1.0, (double)totalSamplesRead / expectedTotalSamples)
                     : 0.0;
 
-                await onChunkDecoded(floatArray, info.ChannelCount, info.SampleRate, progress);
+                await onChunkDecoded(floatBuffer.AsMemory(0, floatCount), info.ChannelCount, info.SampleRate, progress);
             }
 
             await process.WaitForExitAsync(ct);
@@ -178,6 +178,11 @@ public sealed class FfmpegAudioDecoder : IAudioDecoder
         {
             try { process.Kill(entireProcessTree: true); } catch { }
             throw;
+        }
+        finally
+        {
+            System.Buffers.ArrayPool<byte>.Shared.Return(rawBuffer);
+            System.Buffers.ArrayPool<float>.Shared.Return(floatBuffer);
         }
     }
 }

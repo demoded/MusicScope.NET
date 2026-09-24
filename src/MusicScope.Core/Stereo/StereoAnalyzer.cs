@@ -42,14 +42,11 @@ public sealed class StereoAnalyzer
             frameSumL2 += l * l;
             frameSumR2 += r * r;
             frameSumLR += l * r;
-
-            // Mid = (L + R) / sqrt(2), Side = (L - R) / sqrt(2)
-            double mid = (l + r) * 0.7071067811865475;
-            double side = (l - r) * 0.7071067811865475;
-
-            _sumMid2 += mid * mid;
-            _sumSide2 += side * side;
         }
+
+        double halfSumEnergy = 0.5 * (frameSumL2 + frameSumR2);
+        _sumMid2 += halfSumEnergy + frameSumLR;
+        _sumSide2 += halfSumEnergy - frameSumLR;
 
         _sumL2 += frameSumL2;
         _sumR2 += frameSumR2;
@@ -83,13 +80,11 @@ public sealed class StereoAnalyzer
             frameSumL2 += l * l;
             frameSumR2 += r * r;
             frameSumLR += l * r;
-
-            double mid = (l + r) * 0.7071067811865475;
-            double side = (l - r) * 0.7071067811865475;
-
-            _sumMid2 += mid * mid;
-            _sumSide2 += side * side;
         }
+
+        double halfSumEnergy = 0.5 * (frameSumL2 + frameSumR2);
+        _sumMid2 += halfSumEnergy + frameSumLR;
+        _sumSide2 += halfSumEnergy - frameSumLR;
 
         _sumL2 += frameSumL2;
         _sumR2 += frameSumR2;

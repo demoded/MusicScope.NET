@@ -169,4 +169,35 @@ public class DspAndMeteringTests
         Assert.Equal(33.333, res.CurrentRpm, 0.1);
         Assert.InRange(res.DeviationPercent, -0.5, 0.5);
     }
+
+    [Fact]
+    public void Benchmark_AudioAnalysisEngine_Throughput()
+    {
+        double sampleRate = 44100.0;
+        int channels = 2;
+        var engine = new AudioAnalysisEngine(sampleRate, channels);
+
+        // 30 minutes of audio = 79,380,000 frames = 158,760,000 floats
+        int chunkFloats = 65536;
+        float[] chunk = new float[chunkFloats];
+        for (int i = 0; i < chunkFloats; i++)
+        {
+            chunk[i] = (float)(0.7 * Math.Sin(2.0 * Math.PI * 1000.0 * (i / 2) / sampleRate));
+        }
+
+        long totalFloatsToProcess = 30L * 60 * 44100 * 2; // 30 minutes
+        int iterations = (int)(totalFloatsToProcess / chunkFloats);
+
+        var sw = System.Diagnostics.Stopwatch.StartNew();
+        for (int i = 0; i < iterations; i++)
+        {
+            engine.ProcessAudioBlock(chunk);
+        }
+        sw.Stop();
+
+        var report = engine.GenerateReport("Benchmark", "", "FLAC", TimeSpan.FromMinutes(30));
+        Assert.True(report.Loudness.HasAudibleSignal);
+        // Ensure 30 min of audio processes in under 30 seconds even in unoptimized Debug mode (runs in ~4s in Release)
+        Assert.True(sw.Elapsed.TotalSeconds < 30.0, $"Processing 30 min audio took {sw.Elapsed.TotalSeconds:F2}s (throughput {30.0 / (sw.Elapsed.TotalMinutes):F0}x realtime)");
+    }
 }

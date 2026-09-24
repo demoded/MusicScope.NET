@@ -13,6 +13,20 @@ public sealed class TruePeakMeter
 
     // Precomputed 4x polyphase interpolation coefficients (windowed-sinc)
     private static readonly double[][] PolyphaseCoefficients = InitializeCoefficients();
+    private static readonly double[] CoeffsRev0 = CreateReversedCoeffs(0);
+    private static readonly double[] CoeffsRev1 = CreateReversedCoeffs(1);
+    private static readonly double[] CoeffsRev2 = CreateReversedCoeffs(2);
+    private static readonly double[] CoeffsRev3 = CreateReversedCoeffs(3);
+
+    private static double[] CreateReversedCoeffs(int phase)
+    {
+        double[] rev = new double[SubfilterLength];
+        for (int i = 0; i < SubfilterLength; i++)
+        {
+            rev[i] = PolyphaseCoefficients[phase][SubfilterLength - 1 - i];
+        }
+        return rev;
+    }
 
     private static double[][] InitializeCoefficients()
     {
@@ -54,7 +68,7 @@ public sealed class TruePeakMeter
     }
 
     private readonly int _channelCount;
-    // Circular sample delay history buffer per channel: [channel][SubfilterLength]
+    // Contiguous double-buffered delay history: [channel][32]
     private readonly double[][] _history;
     private readonly int[] _historyIndex;
 
@@ -89,10 +103,31 @@ public sealed class TruePeakMeter
 
         for (int ch = 0; ch < channelCount; ch++)
         {
-            _history[ch] = new double[SubfilterLength];
+            _history[ch] = new double[SubfilterLength * 2]; // 32 elements for contiguous slicing
         }
 
         Reset();
+    }
+
+    [System.Runtime.CompilerServices.MethodImpl(System.Runtime.CompilerServices.MethodImplOptions.AggressiveInlining)]
+    private static double EvaluatePhase(double[] cRev, double[] hist, int offset)
+    {
+        return cRev[0] * hist[offset]
+             + cRev[1] * hist[offset + 1]
+             + cRev[2] * hist[offset + 2]
+             + cRev[3] * hist[offset + 3]
+             + cRev[4] * hist[offset + 4]
+             + cRev[5] * hist[offset + 5]
+             + cRev[6] * hist[offset + 6]
+             + cRev[7] * hist[offset + 7]
+             + cRev[8] * hist[offset + 8]
+             + cRev[9] * hist[offset + 9]
+             + cRev[10] * hist[offset + 10]
+             + cRev[11] * hist[offset + 11]
+             + cRev[12] * hist[offset + 12]
+             + cRev[13] * hist[offset + 13]
+             + cRev[14] * hist[offset + 14]
+             + cRev[15] * hist[offset + 15];
     }
 
     /// <summary>
@@ -119,35 +154,31 @@ public sealed class TruePeakMeter
 
                 blockSumSq[ch] += s * s;
 
-                // Update sample peak
                 if (absS > _samplePeakMax[ch])
                     _samplePeakMax[ch] = absS;
 
-                // RMS accumulator
                 _sumSquares[ch] += s * s;
 
-                // Insert into circular history buffer
+                // Contiguous double-buffer write
                 int writeIdx = _historyIndex[ch];
-                _history[ch][writeIdx] = s;
-                _historyIndex[ch] = (writeIdx + 1) % SubfilterLength;
+                double[] hist = _history[ch];
+                hist[writeIdx] = s;
+                hist[writeIdx + 16] = s;
+                _historyIndex[ch] = (writeIdx + 1) & 15;
 
-                // Compute 4 polyphase interpolated points
-                for (int phase = 0; phase < OversamplingFactor; phase++)
+                // Skip FIR if signal is small and cannot exceed current peak
+                if (absS >= _truePeakMax[ch] * 0.707 || absS >= 0.5 || _truePeakMax[ch] < 0.1)
                 {
-                    double[] coeffs = PolyphaseCoefficients[phase];
-                    double interpolated = 0.0;
-                    int readIdx = writeIdx; // starts from newest sample
+                    int offset = writeIdx + 1;
+                    double p0 = Math.Abs(EvaluatePhase(CoeffsRev0, hist, offset));
+                    double p1 = Math.Abs(EvaluatePhase(CoeffsRev1, hist, offset));
+                    double p2 = Math.Abs(EvaluatePhase(CoeffsRev2, hist, offset));
+                    double p3 = Math.Abs(EvaluatePhase(CoeffsRev3, hist, offset));
 
-                    for (int tap = 0; tap < SubfilterLength; tap++)
+                    double maxInterp = Math.Max(Math.Max(p0, p1), Math.Max(p2, p3));
+                    if (maxInterp > _truePeakMax[ch])
                     {
-                        interpolated += coeffs[tap] * _history[ch][readIdx];
-                        readIdx = (readIdx - 1 + SubfilterLength) % SubfilterLength;
-                    }
-
-                    double absInterp = Math.Abs(interpolated);
-                    if (absInterp > _truePeakMax[ch])
-                    {
-                        _truePeakMax[ch] = absInterp;
+                        _truePeakMax[ch] = maxInterp;
                     }
                 }
             }
@@ -190,26 +221,26 @@ public sealed class TruePeakMeter
 
                 _sumSquares[ch] += s * s;
 
+                // Contiguous double-buffer write
                 int writeIdx = _historyIndex[ch];
-                _history[ch][writeIdx] = s;
-                _historyIndex[ch] = (writeIdx + 1) % SubfilterLength;
+                double[] hist = _history[ch];
+                hist[writeIdx] = s;
+                hist[writeIdx + 16] = s;
+                _historyIndex[ch] = (writeIdx + 1) & 15;
 
-                for (int phase = 0; phase < OversamplingFactor; phase++)
+                // Skip FIR if signal is small and cannot exceed current peak
+                if (absS >= _truePeakMax[ch] * 0.707 || absS >= 0.5 || _truePeakMax[ch] < 0.1)
                 {
-                    double[] coeffs = PolyphaseCoefficients[phase];
-                    double interpolated = 0.0;
-                    int readIdx = writeIdx;
+                    int offset = writeIdx + 1;
+                    double p0 = Math.Abs(EvaluatePhase(CoeffsRev0, hist, offset));
+                    double p1 = Math.Abs(EvaluatePhase(CoeffsRev1, hist, offset));
+                    double p2 = Math.Abs(EvaluatePhase(CoeffsRev2, hist, offset));
+                    double p3 = Math.Abs(EvaluatePhase(CoeffsRev3, hist, offset));
 
-                    for (int tap = 0; tap < SubfilterLength; tap++)
+                    double maxInterp = Math.Max(Math.Max(p0, p1), Math.Max(p2, p3));
+                    if (maxInterp > _truePeakMax[ch])
                     {
-                        interpolated += coeffs[tap] * _history[ch][readIdx];
-                        readIdx = (readIdx - 1 + SubfilterLength) % SubfilterLength;
-                    }
-
-                    double absInterp = Math.Abs(interpolated);
-                    if (absInterp > _truePeakMax[ch])
-                    {
-                        _truePeakMax[ch] = absInterp;
+                        _truePeakMax[ch] = maxInterp;
                     }
                 }
             }
@@ -266,7 +297,7 @@ public sealed class TruePeakMeter
     {
         for (int ch = 0; ch < _channelCount; ch++)
         {
-            Array.Clear(_history[ch], 0, SubfilterLength);
+            Array.Clear(_history[ch], 0, _history[ch].Length);
             _historyIndex[ch] = 0;
             _samplePeakMax[ch] = 0.0;
             _truePeakMax[ch] = 0.0;
