@@ -4,10 +4,7 @@
 **/publish/
 
 # Tools & Decompiled cache
-tools/*.jar
-tools/MusicScope-extracted.jar
-tools/src-decompiled/raw-exe/
-tools/src-decompiled/raw-mscv/
+tools/
 publish/
 
 # Bundled legacy Java App
