@@ -10,8 +10,8 @@ tools/src-decompiled/raw-exe/
 tools/src-decompiled/raw-mscv/
 publish/
 
-# Bundled legacy JRE
-OriginalJavaApp/jre/
+# Bundled legacy Java App
+OriginalJavaApp/
 
 # User-specific files
 *.user
