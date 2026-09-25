@@ -52,7 +52,12 @@ public sealed class HistoryDialControl : Control
     private static readonly IBrush RedRingBrush = new SolidColorBrush(Color.FromRgb(180, 0, 0));
     private static readonly IBrush GreenWaveformBrush = new SolidColorBrush(Color.FromRgb(0, 200, 50));
     private static readonly IBrush OrangeWaveformBrush = new SolidColorBrush(Color.FromRgb(232, 154, 32));
+    private static readonly IBrush ScaleWhiteBrush = new SolidColorBrush(Color.FromRgb(240, 243, 246)); // Bright white scale numbers
+    private static readonly IBrush ScaleRedBrush = new SolidColorBrush(Color.FromRgb(255, 60, 60));     // Bright red for 3 and 0 dB
+    private static readonly IBrush DialBackgroundBrush = new SolidColorBrush(Color.FromRgb(0, 0, 0));
+    private static readonly Typeface ScaleTypeface = new Typeface(FontFamily.Default, FontStyle.Normal, FontWeight.SemiBold);
     private static readonly IPen RedOuterPen = new Pen(RedRingBrush, 1.5);
+    private static readonly IPen RedZeroPen = new Pen(RedRingBrush, 1.0);
     private static readonly IPen RingPen = new Pen(new SolidColorBrush(Color.FromRgb(45, 50, 55)), 1);
     private static readonly IPen SpokePen = new Pen(new SolidColorBrush(Color.FromRgb(35, 40, 45)), 1);
     private static readonly IPen GreenWaveformPen = new Pen(GreenWaveformBrush, 1.2);
@@ -103,12 +108,8 @@ public sealed class HistoryDialControl : Control
             double r = DbToRadius(ringDbs[i]);
             if (r > 1)
             {
-                IPen pen = i == 0 ? RedOuterPen : RingPen;
+                IPen pen = i == 0 ? RedOuterPen : (i == 1 ? RedZeroPen : RingPen);
                 context.DrawEllipse(null, pen, new Point(centerX, centerY), r, r);
-
-                // Label at 12 o'clock
-                IBrush tb = i == 0 ? RedRingBrush : DimLabelBrush;
-                DrawCenteredText(context, ringLabels[i], tf, 8, tb, centerX, centerY - r - 2);
             }
         }
 
@@ -159,6 +160,26 @@ public sealed class HistoryDialControl : Control
             double curAngle = TrackProgress * (2.0 * Math.PI) - Math.PI / 2.0;
             Point needleEnd = new Point(centerX + maxRadius * Math.Cos(curAngle), centerY + maxRadius * Math.Sin(curAngle));
             context.DrawLine(NeedlePen, new Point(centerX, centerY), needleEnd);
+        }
+
+        // Scale labels at 12 o'clock drawn on TOP of rings, spokes, and waveforms
+        for (int i = 0; i < ringDbs.Length; i++)
+        {
+            double r = DbToRadius(ringDbs[i]);
+            IBrush tb = (i == 0 || i == 1) ? ScaleRedBrush : ScaleWhiteBrush;
+            var ft = new FormattedText(ringLabels[i], CultureInfo.InvariantCulture, FlowDirection.LeftToRight, ScaleTypeface, 10.5, tb);
+
+            double textX = centerX - 3 - ft.Width;
+            double textY = centerY - r - ft.Height / 2.0;
+
+            if (i == 0)
+            {
+                textY = Math.Max(2.0, textY);
+            }
+
+            // Draw clean background backing so numbers are never crossed or obscured by radial lines or waveforms
+            context.FillRectangle(DialBackgroundBrush, new Rect(textX - 1, textY - 1, ft.Width + 2, ft.Height + 2));
+            context.DrawText(ft, new Point(textX, textY));
         }
     }
 
