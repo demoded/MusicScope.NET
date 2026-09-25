@@ -89,16 +89,82 @@ dotnet test --no-build MusicScope.slnx
 dotnet run --project src/MusicScope.Desktop/MusicScope.Desktop.csproj
 ```
 
-### Publish Self-Contained Builds
+### Publish Self-Contained Builds (Single Platform)
 ```pwsh
-# Windows
+# Windows (x64 / arm64)
 dotnet publish src/MusicScope.Desktop -r win-x64 -c Release -o publish/win-x64
+dotnet publish src/MusicScope.Desktop -r win-arm64 -c Release -o publish/win-arm64
 
-# macOS Apple Silicon
+# macOS (Apple Silicon / Intel)
 dotnet publish src/MusicScope.Desktop -r osx-arm64 -c Release -o publish/osx-arm64
+dotnet publish src/MusicScope.Desktop -r osx-x64 -c Release -o publish/osx-x64
 
-# Linux
+# Linux (x64 / arm64)
 dotnet publish src/MusicScope.Desktop -r linux-x64 -c Release -o publish/linux-x64
+dotnet publish src/MusicScope.Desktop -r linux-arm64 -c Release -o publish/linux-arm64
+```
+
+### Creating Cross-Platform GitHub Releases
+
+To build, package, hash, and publish a full multi-platform release for all 6 supported architectures (`win-x64`, `win-arm64`, `osx-x64`, `osx-arm64`, `linux-x64`, `linux-arm64`):
+
+#### 1. Publish All Target Platforms
+```pwsh
+$RIDs = @("win-x64", "win-arm64", "osx-x64", "osx-arm64", "linux-x64", "linux-arm64")
+foreach ($rid in $RIDs) {
+    dotnet publish src/MusicScope.Desktop -r $rid -c Release -p:PublishSingleFile=true --self-contained true -o "dist/$rid"
+}
+```
+
+#### 2. Clean Debugging Symbols (PDBs)
+Strip bulky native and managed symbol files (`libSkiaSharp.pdb`, etc.) from distribution folders to save ~100 MB per archive:
+```pwsh
+Remove-Item dist/*/*.pdb -Force
+```
+
+#### 3. Package Distribution Archives
+```pwsh
+New-Item -ItemType Directory -Force -Path dist/release
+$Version = "v1.0.0"
+
+# Windows (ZIP)
+Compress-Archive -Path dist/win-x64/* -DestinationPath "dist/release/MusicScope.NET-$Version-win-x64.zip" -Force
+Compress-Archive -Path dist/win-arm64/* -DestinationPath "dist/release/MusicScope.NET-$Version-win-arm64.zip" -Force
+
+# macOS (ZIP)
+Compress-Archive -Path dist/osx-x64/* -DestinationPath "dist/release/MusicScope.NET-$Version-osx-x64.zip" -Force
+Compress-Archive -Path dist/osx-arm64/* -DestinationPath "dist/release/MusicScope.NET-$Version-osx-arm64.zip" -Force
+
+# Linux (TAR.GZ to preserve POSIX file execution permissions)
+tar -czf "dist/release/MusicScope.NET-$Version-linux-x64.tar.gz" -C dist/linux-x64 .
+tar -czf "dist/release/MusicScope.NET-$Version-linux-arm64.tar.gz" -C dist/linux-arm64 .
+```
+
+#### 4. Generate SHA-256 Checksums
+```pwsh
+Get-ChildItem -Path dist/release -Include *.zip,*.tar.gz | 
+    Get-FileHash -Algorithm SHA256 | 
+    ForEach-Object { "$($_.Hash.ToLower())  $(Split-Path $_.Path -Leaf)" } | 
+    Set-Content -Encoding utf8 dist/release/SHA256SUMS.txt
+```
+
+#### 5. Tag and Publish GitHub Release
+```pwsh
+# 1. Create and push git tag
+git tag -a $Version -m "Release $Version - Cross-Platform Release"
+git push origin $Version
+
+# 2. Publish release with assets via GitHub CLI
+gh release create $Version `
+    dist/release/MusicScope.NET-$Version-win-x64.zip `
+    dist/release/MusicScope.NET-$Version-win-arm64.zip `
+    dist/release/MusicScope.NET-$Version-osx-x64.zip `
+    dist/release/MusicScope.NET-$Version-osx-arm64.zip `
+    dist/release/MusicScope.NET-$Version-linux-x64.tar.gz `
+    dist/release/MusicScope.NET-$Version-linux-arm64.tar.gz `
+    dist/release/SHA256SUMS.txt `
+    --title "$Version - Cross-Platform Release" `
+    --notes-file dist/release/RELEASE_NOTES.md
 ```
 
 ---
