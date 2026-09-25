@@ -162,14 +162,14 @@ public sealed class HistoryDialControl : Control
             context.DrawLine(NeedlePen, new Point(centerX, centerY), needleEnd);
         }
 
-        // Scale labels at 12 o'clock drawn on TOP of rings, spokes, and waveforms
+        // Scale labels at 12 o'clock drawn on TOP of rings, spokes, and waveforms (center-aligned vertically along radial axis)
         for (int i = 0; i < ringDbs.Length; i++)
         {
             double r = DbToRadius(ringDbs[i]);
             IBrush tb = (i == 0 || i == 1) ? ScaleRedBrush : ScaleWhiteBrush;
             var ft = new FormattedText(ringLabels[i], CultureInfo.InvariantCulture, FlowDirection.LeftToRight, ScaleTypeface, 10.5, tb);
 
-            double textX = centerX - 3 - ft.Width;
+            double textX = centerX - ft.Width / 2.0;
             double textY = centerY - r - ft.Height / 2.0;
 
             if (i == 0)
@@ -177,8 +177,8 @@ public sealed class HistoryDialControl : Control
                 textY = Math.Max(2.0, textY);
             }
 
-            // Draw clean background backing so numbers are never crossed or obscured by radial lines or waveforms
-            context.FillRectangle(DialBackgroundBrush, new Rect(textX - 1, textY - 1, ft.Width + 2, ft.Height + 2));
+            // Draw clean background cutout so numbers are never crossed or obscured by radial lines or waveforms
+            context.FillRectangle(DialBackgroundBrush, new Rect(textX - 2, textY - 1, ft.Width + 4, ft.Height + 2));
             context.DrawText(ft, new Point(textX, textY));
         }
     }
