@@ -37,10 +37,23 @@ public sealed class AudioAnalysisEngine
     private readonly float[] _goniometerX = new float[256];
     private readonly float[] _goniometerY = new float[256];
 
-    public AudioAnalysisEngine(double sampleRate = 44100.0, int channelCount = 2)
+    public const int HistoryBinCount = 512;
+    private readonly double[] _peakHistory = new double[HistoryBinCount];
+    private readonly double[] _loudnessHistory = new double[HistoryBinCount];
+    private long _totalFrames;
+    private long _processedFrames;
+
+    public long TotalFrames
+    {
+        get => _totalFrames;
+        set => _totalFrames = value;
+    }
+
+    public AudioAnalysisEngine(double sampleRate = 44100.0, int channelCount = 2, long totalFrames = 0)
     {
         _sampleRate = sampleRate;
         _channelCount = channelCount;
+        _totalFrames = totalFrames;
 
         _loudnessMeter = new LoudnessMeter(sampleRate, channelCount);
         _truePeakMeter = new TruePeakMeter(channelCount, sampleRate);
@@ -50,6 +63,8 @@ public sealed class AudioAnalysisEngine
         _fftWindow = WindowFunctions.Create(WindowType.BlackmanHarris, FftSize);
         Array.Fill(_latestInstantSpectrumDb, -140.0);
         Array.Fill(_peakHoldSpectrumDb, -140.0);
+        Array.Fill(_peakHistory, -60.0);
+        Array.Fill(_loudnessHistory, -60.0);
     }
 
     /// <summary>
@@ -133,6 +148,55 @@ public sealed class AudioAnalysisEngine
                 break;
             }
         }
+
+        // Update polar history dial (512 radial bins)
+        if (frameCount > 0)
+        {
+            const int StepFrames = 2048;
+            for (int offset = 0; offset < frameCount; offset += StepFrames)
+            {
+                int count = Math.Min(StepFrames, frameCount - offset);
+                int sampleOffset = offset * _channelCount;
+                int sampleCount = count * _channelCount;
+
+                ReadOnlySpan<float> slice = interleavedSamples.Slice(sampleOffset, sampleCount);
+                float maxSample = 0f;
+                for (int s = 0; s < slice.Length; s++)
+                {
+                    float v = Math.Abs(slice[s]);
+                    if (v > maxSample) maxSample = v;
+                }
+                double slicePeakDb = maxSample > 1e-6f ? 20.0 * Math.Log10(maxSample) : -100.0;
+                double currentPeakDb = Math.Max(slicePeakDb, Math.Max(_truePeakMeter.CurrentBlockPeakLeftDb, _truePeakMeter.CurrentBlockPeakRightDb));
+                double currentLoudnessDb = _loudnessMeter.CurrentShortTermLufs;
+
+                long startF = _processedFrames + offset;
+                long endF = startF + count;
+
+                if (_totalFrames > 0)
+                {
+                    int startBin = (int)((double)startF / _totalFrames * HistoryBinCount);
+                    int endBin = (int)((double)endF / _totalFrames * HistoryBinCount);
+                    startBin = Math.Clamp(startBin, 0, HistoryBinCount - 1);
+                    endBin = Math.Clamp(endBin, 0, HistoryBinCount - 1);
+
+                    for (int b = startBin; b <= endBin; b++)
+                    {
+                        if (currentPeakDb > _peakHistory[b])
+                            _peakHistory[b] = currentPeakDb;
+                        if (currentLoudnessDb > _loudnessHistory[b])
+                            _loudnessHistory[b] = currentLoudnessDb;
+                    }
+                }
+                else
+                {
+                    int bin = (int)((endF / _sampleRate) % HistoryBinCount);
+                    _peakHistory[bin] = currentPeakDb;
+                    _loudnessHistory[bin] = currentLoudnessDb;
+                }
+            }
+            _processedFrames += frameCount;
+        }
     }
 
     /// <summary>
@@ -157,6 +221,12 @@ public sealed class AudioAnalysisEngine
         Array.Copy(_goniometerX, gonioX, gonioX.Length);
         Array.Copy(_goniometerY, gonioY, gonioY.Length);
 
+        double[] peakHistoryCopy = new double[HistoryBinCount];
+        Array.Copy(_peakHistory, peakHistoryCopy, HistoryBinCount);
+
+        double[] loudnessHistoryCopy = new double[HistoryBinCount];
+        Array.Copy(_loudnessHistory, loudnessHistoryCopy, HistoryBinCount);
+
         return new AudioRealtimeSnapshot
         {
             ProgressFraction = progress,
@@ -173,6 +243,8 @@ public sealed class AudioAnalysisEngine
             Correlation = _stereoAnalyzer.RealtimeCorrelation,
             InstantSpectrumDb = spectrumCopy,
             CumulativePeakSpectrumDb = peakHoldCopy,
+            PeakHistory = peakHistoryCopy,
+            LoudnessHistory = loudnessHistoryCopy,
             GoniometerPointsX = gonioX,
             GoniometerPointsY = gonioY
         };
@@ -191,6 +263,23 @@ public sealed class AudioAnalysisEngine
         double[] finalSpectrumDb = new double[FftSize / 2];
         Array.Copy(_peakHoldSpectrumDb, finalSpectrumDb, finalSpectrumDb.Length);
 
+        // Ensure trailing bins up to 511 are populated if decoding finished slightly early
+        if (_totalFrames > 0 && _processedFrames > 0)
+        {
+            int lastBin = Math.Clamp((int)((double)_processedFrames / _totalFrames * HistoryBinCount), 0, HistoryBinCount - 1);
+            for (int b = lastBin + 1; b < HistoryBinCount; b++)
+            {
+                _peakHistory[b] = _peakHistory[lastBin];
+                _loudnessHistory[b] = _loudnessHistory[lastBin];
+            }
+        }
+
+        double[] finalPeakHistory = new double[HistoryBinCount];
+        Array.Copy(_peakHistory, finalPeakHistory, HistoryBinCount);
+
+        double[] finalLoudnessHistory = new double[HistoryBinCount];
+        Array.Copy(_loudnessHistory, finalLoudnessHistory, HistoryBinCount);
+
         return new FullAnalysisReport
         {
             Title = title,
@@ -203,7 +292,9 @@ public sealed class AudioAnalysisEngine
             Loudness = loudnessResult,
             Levels = levelsResult,
             Stereo = stereoResult,
-            SpectrumMagnitudesDb = finalSpectrumDb
+            SpectrumMagnitudesDb = finalSpectrumDb,
+            PeakHistory = finalPeakHistory,
+            LoudnessHistory = finalLoudnessHistory
         };
     }
 
@@ -218,6 +309,9 @@ public sealed class AudioAnalysisEngine
         Array.Clear(_accumulatedSpectrum, 0, _accumulatedSpectrum.Length);
         Array.Fill(_peakHoldSpectrumDb, -140.0);
         Array.Fill(_latestInstantSpectrumDb, -140.0);
+        Array.Fill(_peakHistory, -60.0);
+        Array.Fill(_loudnessHistory, -60.0);
+        _processedFrames = 0;
         _spectrumFftCount = 0;
     }
 }

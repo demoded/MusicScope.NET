@@ -38,6 +38,10 @@ public record AudioRealtimeSnapshot
     public double[]? InstantSpectrumDb { get; init; }
     public double[]? CumulativePeakSpectrumDb { get; init; }
 
+    // Polar history dial (512 radial bins)
+    public double[]? PeakHistory { get; init; }
+    public double[]? LoudnessHistory { get; init; }
+
     // Goniometer vector points for phosphor scope
     public float[]? GoniometerPointsX { get; init; }
     public float[]? GoniometerPointsY { get; init; }

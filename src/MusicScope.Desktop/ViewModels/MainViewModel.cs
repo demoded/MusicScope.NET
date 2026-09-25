@@ -229,7 +229,7 @@ public partial class MainViewModel : ViewModelBase
                     info.FormatName.Contains("DSF", StringComparison.OrdinalIgnoreCase) ||
                     info.FormatName.Contains("DFF", StringComparison.OrdinalIgnoreCase);
 
-            var engine = new AudioAnalysisEngine(info.SampleRate, info.ChannelCount);
+            var engine = new AudioAnalysisEngine(info.SampleRate, info.ChannelCount, info.TotalFrames);
 
             var sw = System.Diagnostics.Stopwatch.StartNew();
             long lastUiUpdateMs = 0;
@@ -309,9 +309,10 @@ public partial class MainViewModel : ViewModelBase
         GoniometerPointsX = s.GoniometerPointsX;
         GoniometerPointsY = s.GoniometerPointsY;
 
-        int histIdx = Math.Clamp((int)(s.ProgressFraction * 511.0), 0, 511);
-        PeakHistory[histIdx] = currentMaxPeak;
-        LoudnessHistory[histIdx] = s.MomentaryLufs;
+        if (s.PeakHistory != null)
+            PeakHistory = s.PeakHistory;
+        if (s.LoudnessHistory != null)
+            LoudnessHistory = s.LoudnessHistory;
     }
 
     [RelayCommand]
@@ -376,6 +377,10 @@ public partial class MainViewModel : ViewModelBase
         SideLevel = r.Stereo.SideLevelDb;
 
         SpectrumMagnitudes = r.SpectrumMagnitudesDb;
+        if (r.PeakHistory != null && r.PeakHistory.Length > 0)
+            PeakHistory = r.PeakHistory;
+        if (r.LoudnessHistory != null && r.LoudnessHistory.Length > 0)
+            LoudnessHistory = r.LoudnessHistory;
         TrackProgress = 1.0;
     }
 }

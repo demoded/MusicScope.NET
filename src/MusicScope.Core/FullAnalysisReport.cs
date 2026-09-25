@@ -28,4 +28,14 @@ public record FullAnalysisReport
     /// Average frequency spectrum in dBFS (size / 2 frequency bins).
     /// </summary>
     public double[] SpectrumMagnitudesDb { get; init; } = [];
+
+    /// <summary>
+    /// Polar peak history across 512 radial bins.
+    /// </summary>
+    public double[] PeakHistory { get; init; } = [];
+
+    /// <summary>
+    /// Polar loudness history across 512 radial bins.
+    /// </summary>
+    public double[] LoudnessHistory { get; init; } = [];
 }

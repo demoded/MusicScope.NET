@@ -55,6 +55,10 @@ public sealed class HistoryDialControl : Control
     private static readonly IPen RedOuterPen = new Pen(RedRingBrush, 1.5);
     private static readonly IPen RingPen = new Pen(new SolidColorBrush(Color.FromRgb(45, 50, 55)), 1);
     private static readonly IPen SpokePen = new Pen(new SolidColorBrush(Color.FromRgb(35, 40, 45)), 1);
+    private static readonly IPen GreenWaveformPen = new Pen(GreenWaveformBrush, 1.2);
+    private static readonly IPen RedWaveformPen = new Pen(new SolidColorBrush(Color.FromRgb(255, 0, 0)), 1.2);
+    private static readonly IPen OrangeWaveformPen = new Pen(OrangeWaveformBrush, 1.2);
+    private static readonly IPen NeedlePen = new Pen(LabelBrush, 1);
 
     static HistoryDialControl()
     {
@@ -112,16 +116,19 @@ public sealed class HistoryDialControl : Control
         context.DrawLine(SpokePen, new Point(centerX - maxRadius, centerY), new Point(centerX + maxRadius, centerY));
         context.DrawLine(SpokePen, new Point(centerX, centerY - maxRadius), new Point(centerX, centerY + maxRadius));
 
-        // Draw Peak History (Green) & Loudness History (Amber) around the circle
+        // Draw Peak History (Green / Red when > 0 dB) & Loudness History (Amber) around the circle
         double[] peaks = PeakHistory;
         double[] loudness = LoudnessHistory;
         int points = Math.Min(peaks.Length, loudness.Length);
         if (points < 2) return;
 
+        int pointsToDraw = TrackProgress >= 1.0 ? points : Math.Clamp((int)(TrackProgress * points), 0, points);
+        if (pointsToDraw < 2) return;
+
         Point? prevPeakPt = null;
         Point? prevLoudnessPt = null;
 
-        for (int i = 0; i < points; i++)
+        for (int i = 0; i < pointsToDraw; i++)
         {
             // Angle around circle: starts at top (12 o'clock) and rotates clockwise
             double angleRad = (i / (double)points) * (2.0 * Math.PI) - Math.PI / 2.0;
@@ -135,25 +142,23 @@ public sealed class HistoryDialControl : Control
             Point ptPeak = new Point(centerX + rPeak * Math.Cos(angleRad), centerY + rPeak * Math.Sin(angleRad));
             Point ptLoud = new Point(centerX + rLoud * Math.Cos(angleRad), centerY + rLoud * Math.Sin(angleRad));
 
-            if (prevPeakPt.HasValue && rPeak > 2)
+            if (prevPeakPt.HasValue)
             {
-                context.DrawLine(new Pen(GreenWaveformBrush, 1.2), prevPeakPt.Value, ptPeak);
-            }
-            if (prevLoudnessPt.HasValue && rLoud > 2)
-            {
-                context.DrawLine(new Pen(OrangeWaveformBrush, 1.2), prevLoudnessPt.Value, ptLoud);
+                IPen peakPen = pDb > 0.0 ? RedWaveformPen : GreenWaveformPen;
+                context.DrawLine(peakPen, prevPeakPt.Value, ptPeak);
+                context.DrawLine(OrangeWaveformPen, prevLoudnessPt!.Value, ptLoud);
             }
 
             prevPeakPt = ptPeak;
             prevLoudnessPt = ptLoud;
         }
 
-        // Current track progress needle (subtle spoke)
-        if (TrackProgress > 0.0 && TrackProgress <= 1.0)
+        // Current track progress needle (subtle spoke while actively analyzing)
+        if (TrackProgress > 0.0 && TrackProgress < 1.0)
         {
             double curAngle = TrackProgress * (2.0 * Math.PI) - Math.PI / 2.0;
             Point needleEnd = new Point(centerX + maxRadius * Math.Cos(curAngle), centerY + maxRadius * Math.Sin(curAngle));
-            context.DrawLine(new Pen(LabelBrush, 1), new Point(centerX, centerY), needleEnd);
+            context.DrawLine(NeedlePen, new Point(centerX, centerY), needleEnd);
         }
     }
 

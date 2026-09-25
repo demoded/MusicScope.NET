@@ -227,4 +227,52 @@ public class DspAndMeteringTests
         Assert.InRange(result.CrestFactorDb, 2.9, 3.1);
         Assert.InRange(meter.CrestAvgDb, 2.9, 3.1);
     }
+
+    [Fact]
+    public void AudioAnalysisEngine_PolarHistory_PopulatesAll512Bins_RegardlessOfChunkSize()
+    {
+        double sampleRate = 44100.0;
+        int durationSec = 10;
+        int totalFrames = (int)(durationSec * sampleRate);
+        float[] pcm = new float[totalFrames * 2];
+        for (int i = 0; i < totalFrames; i++)
+        {
+            float val = (float)(0.5 * Math.Sin(2.0 * Math.PI * 1000.0 * i / sampleRate)); // -6.02 dBFS
+            pcm[i * 2] = val;
+            pcm[i * 2 + 1] = val;
+        }
+
+        // Engine A: large chunks (e.g. 65536 floats)
+        var engineA = new AudioAnalysisEngine(sampleRate, 2, totalFrames);
+        int chunkSizeA = 65536;
+        for (int offset = 0; offset < pcm.Length; offset += chunkSizeA)
+        {
+            int len = Math.Min(chunkSizeA, pcm.Length - offset);
+            engineA.ProcessAudioBlock(pcm.AsSpan(offset, len));
+        }
+        var reportA = engineA.GenerateReport(duration: TimeSpan.FromSeconds(durationSec));
+
+        // Engine B: small chunks (e.g. 1024 floats)
+        var engineB = new AudioAnalysisEngine(sampleRate, 2, totalFrames);
+        int chunkSizeB = 1024;
+        for (int offset = 0; offset < pcm.Length; offset += chunkSizeB)
+        {
+            int len = Math.Min(chunkSizeB, pcm.Length - offset);
+            engineB.ProcessAudioBlock(pcm.AsSpan(offset, len));
+        }
+        var reportB = engineB.GenerateReport(duration: TimeSpan.FromSeconds(durationSec));
+
+        Assert.Equal(512, reportA.PeakHistory.Length);
+        Assert.Equal(512, reportA.LoudnessHistory.Length);
+        Assert.Equal(512, reportB.PeakHistory.Length);
+        Assert.Equal(512, reportB.LoudnessHistory.Length);
+
+        // Every bin should be populated (~ -6.0 dBFS) without any bin dropping to -60 dB
+        for (int b = 0; b < 512; b++)
+        {
+            Assert.True(reportA.PeakHistory[b] > -10.0, $"Engine A bin {b} was unpopulated: {reportA.PeakHistory[b]} dB");
+            Assert.True(reportB.PeakHistory[b] > -10.0, $"Engine B bin {b} was unpopulated: {reportB.PeakHistory[b]} dB");
+            Assert.InRange(Math.Abs(reportA.PeakHistory[b] - reportB.PeakHistory[b]), 0.0, 0.5);
+        }
+    }
 }
