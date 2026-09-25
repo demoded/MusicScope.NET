@@ -10,8 +10,8 @@ __pycache__/
 publish/
 
 # Bundled legacy Java App
-OriginalJavaApp/jre/
-OriginalJavaApp/lib/
+OriginalJavaApp/*
+!OriginalJavaApp/*.zip
 
 # User-specific files
 *.user

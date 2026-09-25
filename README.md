@@ -47,10 +47,33 @@ MusicScope.NET/
 │   └── MusicScope.Desktop/     # AvaloniaUI 12.x desktop app (Windows, macOS, Linux)
 ├── tests/
 │   └── MusicScope.Core.Tests/  # xUnit tests verifying DSP parity against BS.1770
-└── tools/
-    ├── organize_and_deobfuscate.py  # Bytecode symbol deobfuscation script
-    └── src-decompiled/organized/    # Clean categorized Java reference files
+├── OriginalJavaApp/            # Original legacy distribution package
+│   └── OriginalJavaApp.zip     # Full legacy XiVero MusicScope distribution archive
+└── tools/                      # Decompilation archives, scripts, and references
+    ├── src-decompiled.zip      # Complete categorized decompiled Java reference files
+    └── organize_and_deobfuscate.py # Symbol mapper and bytecode organizer script
 ```
+
+---
+
+## Getting Started & Contributing
+
+### 1. Unpacking Reference Archives
+Before continuing development, inspecting original algorithms, or contributing to this project, extract the legacy reference archives:
+
+```bash
+# 1. Extract original Java application into OriginalJavaApp/
+tar -xf OriginalJavaApp/OriginalJavaApp.zip -C OriginalJavaApp/
+# or PowerShell:
+# Expand-Archive OriginalJavaApp/OriginalJavaApp.zip -DestinationPath OriginalJavaApp/
+
+# 2. Extract decompiled Java source references into tools/src-decompiled/
+tar -xf tools/src-decompiled.zip -C tools/
+# or PowerShell:
+# Expand-Archive tools/src-decompiled.zip -DestinationPath tools/
+```
+
+> **Note**: Unzipped files (`OriginalJavaApp/jre/`, `OriginalJavaApp/lib/`, `OriginalJavaApp/*.exe`, and `tools/src-decompiled/`) are strictly isolated by `.gitignore` and **must not be committed** to the repository.
 
 ---
 

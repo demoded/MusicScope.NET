@@ -48,9 +48,11 @@ MusicScope.NET/
 │       └── Views/               # MainWindow.axaml and view code-behinds
 ├── tests/
 │   └── MusicScope.Core.Tests/   # xUnit tests verifying DSP accuracy against original standards
-└── tools/                       # Original bytecode, deobfuscation scripts, and references
+├── OriginalJavaApp/             # Original legacy distribution package
+│   └── OriginalJavaApp.zip      # Full legacy XiVero MusicScope distribution archive
+└── tools/                       # Decompilation archives, scripts, and references
     ├── src-decompiled.zip       # Complete categorized decompiled Java reference files
-    └── OriginalJavaApp.zip      # Original legacy XiVero MusicScope distribution package
+    └── organize_and_deobfuscate.py # Symbol mapper and bytecode organizer script
 ```
 
 ---
@@ -58,6 +60,19 @@ MusicScope.NET/
 ## 3. Essential Developer Commands
 
 All commands should be executed from the repository root:
+
+### Unpack Reference Archives (Required Before Development)
+Before continuing development, reverse engineering, or verifying DSP/UI parity against the original application, extract the legacy reference archives:
+```pwsh
+# 1. Unpack original Java distribution into OriginalJavaApp/
+Expand-Archive OriginalJavaApp/OriginalJavaApp.zip -DestinationPath OriginalJavaApp/
+
+# 2. Unpack decompiled Java references into tools/src-decompiled/
+Expand-Archive tools/src-decompiled.zip -DestinationPath tools/
+```
+> [!IMPORTANT]
+> **Do not commit unzipped files!**
+> The extracted contents (`OriginalJavaApp/jre/`, `OriginalJavaApp/lib/`, `OriginalJavaApp/*.exe`, and `tools/src-decompiled/`) are strictly isolated and ignored by `.gitignore` to keep the git history clean and compact. Only `.zip` files should be tracked.
 
 ### Build Solution
 ```pwsh
