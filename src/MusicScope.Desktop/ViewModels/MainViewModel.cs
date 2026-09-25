@@ -132,6 +132,9 @@ public partial class MainViewModel : ViewModelBase
     private float[]? _goniometerPointsY;
 
     [ObservableProperty]
+    private byte[]? _stereoDensityCloud;
+
+    [ObservableProperty]
     private double _sampleRate = 44100.0;
 
     // DAW Server
@@ -215,6 +218,7 @@ public partial class MainViewModel : ViewModelBase
         ShortTermMax = -60.0;
         PeakHistory = InitializeHistory(-60.0);
         LoudnessHistory = InitializeHistory(-60.0);
+        StereoDensityCloud = null;
         FilePath = path;
         TrackTitle = Path.GetFileNameWithoutExtension(path);
 
@@ -381,6 +385,9 @@ public partial class MainViewModel : ViewModelBase
             PeakHistory = r.PeakHistory;
         if (r.LoudnessHistory != null && r.LoudnessHistory.Length > 0)
             LoudnessHistory = r.LoudnessHistory;
+        StereoDensityCloud = r.Stereo.DensityCloud;
+        GoniometerPointsX = null;
+        GoniometerPointsY = null;
         TrackProgress = 1.0;
     }
 }

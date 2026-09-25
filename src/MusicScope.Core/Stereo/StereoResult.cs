@@ -29,6 +29,11 @@ public record StereoResult
     public double SideLevelDb { get; init; } = -100.0;
 
     /// <summary>
+    /// Cumulative 2D stereo density cloud histogram (256x256 normalized intensity bytes).
+    /// </summary>
+    public byte[]? DensityCloud { get; init; }
+
+    /// <summary>
     /// Mid/Side ratio in dB (Mid - Side). Positive indicates mono-dominant, negative indicates wide stereo.
     /// </summary>
     public double MidSideRatioDb => MidLevelDb - SideLevelDb;

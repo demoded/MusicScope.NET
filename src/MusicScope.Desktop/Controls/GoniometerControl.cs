@@ -3,12 +3,15 @@ using System.Globalization;
 using Avalonia;
 using Avalonia.Controls;
 using Avalonia.Media;
+using Avalonia.Media.Imaging;
+using Avalonia.Platform;
 
 namespace MusicScope.Desktop.Controls;
 
 /// <summary>
 /// Phosphor-style Goniometer / Vector Scope with Tri-color Phase Correlation Bar.
-/// Directly models Box 5 (Stereo) from the MusicScope UI.
+/// Directly models Box 5 (Stereo) from the MusicScope UI, featuring real-time 5000-point
+/// high-resolution phosphor decay trace and the cumulative 2D stereo phosphor density cloud.
 /// </summary>
 public sealed class GoniometerControl : Control
 {
@@ -20,6 +23,12 @@ public sealed class GoniometerControl : Control
 
     public static readonly StyledProperty<float[]?> PointsYProperty =
         AvaloniaProperty.Register<GoniometerControl, float[]?>(nameof(PointsY));
+
+    public static readonly StyledProperty<byte[]?> DensityCloudProperty =
+        AvaloniaProperty.Register<GoniometerControl, byte[]?>(nameof(DensityCloud));
+
+    public static readonly StyledProperty<double> TrackProgressProperty =
+        AvaloniaProperty.Register<GoniometerControl, double>(nameof(TrackProgress), 0.0);
 
     public double Correlation
     {
@@ -39,12 +48,54 @@ public sealed class GoniometerControl : Control
         set => SetValue(PointsYProperty, value);
     }
 
+    public byte[]? DensityCloud
+    {
+        get => GetValue(DensityCloudProperty);
+        set => SetValue(DensityCloudProperty, value);
+    }
+
+    public double TrackProgress
+    {
+        get => GetValue(TrackProgressProperty);
+        set => SetValue(TrackProgressProperty, value);
+    }
+
     private static readonly IBrush HeaderBrush = new SolidColorBrush(Color.FromRgb(0, 220, 0)); // Green Stereo
     private static readonly IBrush CornerLabelBrush = new SolidColorBrush(Color.FromRgb(220, 220, 220));
     private static readonly IBrush OutOfPhaseBrush = new SolidColorBrush(Color.FromRgb(55, 60, 65));
-    private static readonly IBrush PhosphorGlowBrush = new SolidColorBrush(Color.FromArgb(140, 0, 255, 68));
-    private static readonly IBrush PhosphorCoreBrush = new SolidColorBrush(Color.FromArgb(220, 20, 255, 100));
     private static readonly IPen AxisPen = new Pen(new SolidColorBrush(Color.FromRgb(45, 50, 55)), 1);
+
+    // Phosphor decay palette (16 brightness shades from dark phosphor decay to neon core)
+    private static readonly IBrush[] PhosphorPalette = InitializePhosphorPalette();
+    private static readonly IPen[] PhosphorPens = InitializePhosphorPens();
+
+    private static IBrush[] InitializePhosphorPalette()
+    {
+        var palette = new IBrush[16];
+        for (int i = 0; i < 16; i++)
+        {
+            double t = (i + 1) / 16.0;
+            byte r = (byte)(15 * t);
+            byte g = (byte)(40 + 215 * t);
+            byte b = (byte)(35 * t);
+            palette[i] = new SolidColorBrush(Color.FromRgb(r, g, b));
+        }
+        return palette;
+    }
+
+    private static IPen[] InitializePhosphorPens()
+    {
+        var pens = new IPen[16];
+        for (int i = 0; i < 16; i++)
+        {
+            double t = (i + 1) / 16.0;
+            byte r = (byte)(15 * t);
+            byte g = (byte)(40 + 215 * t);
+            byte b = (byte)(35 * t);
+            pens[i] = new Pen(new SolidColorBrush(Color.FromRgb(r, g, b)), 1);
+        }
+        return pens;
+    }
 
     // Correlation Bar Brushes
     private static readonly IBrush CorrRedBrush = new SolidColorBrush(Color.FromRgb(187, 0, 0));
@@ -52,9 +103,34 @@ public sealed class GoniometerControl : Control
     private static readonly IBrush CorrGreenBrush = new SolidColorBrush(Color.FromRgb(0, 153, 0));
     private static readonly IPen CursorPen = new Pen(new SolidColorBrush(Color.FromRgb(255, 255, 255)), 2);
 
+    private WriteableBitmap? _cloudBitmap;
+    private byte[]? _cachedDensityCloud;
+    private readonly double[] _corrHistory = new double[100];
+    private int _corrHistoryCount = 0;
+
     static GoniometerControl()
     {
-        AffectsRender<GoniometerControl>(CorrelationProperty, PointsXProperty, PointsYProperty);
+        AffectsRender<GoniometerControl>(CorrelationProperty, PointsXProperty, PointsYProperty, DensityCloudProperty, TrackProgressProperty);
+        CorrelationProperty.Changed.AddClassHandler<GoniometerControl>((ctrl, e) =>
+        {
+            if (e.NewValue is double val)
+            {
+                ctrl.PushCorrelationHistory(val);
+            }
+        });
+    }
+
+    private void PushCorrelationHistory(double val)
+    {
+        if (_corrHistoryCount < _corrHistory.Length)
+        {
+            _corrHistory[_corrHistoryCount++] = val;
+        }
+        else
+        {
+            Array.Copy(_corrHistory, 1, _corrHistory, 0, _corrHistory.Length - 1);
+            _corrHistory[^1] = val;
+        }
     }
 
     public override void Render(DrawingContext context)
@@ -94,42 +170,104 @@ public sealed class GoniometerControl : Control
             context.DrawLine(AxisPen, new Point(centerX - d, centerY - d), new Point(centerX + d, centerY + d));
             context.DrawLine(AxisPen, new Point(centerX - d, centerY + d), new Point(centerX + d, centerY - d));
 
-            // Draw Phosphor Cloud (Lissajous stereo field)
+            // Draw Phosphor Cloud (Cumulative 2D Density Cloud or Live 5000 Lissajous points)
+            byte[]? cloud = DensityCloud;
             float[]? px = PointsX;
             float[]? py = PointsY;
-            if (px != null && py != null && px.Length > 0 && py.Length > 0)
+
+            if (cloud == null)
             {
+                _cachedDensityCloud = null;
+                _cloudBitmap = null;
+            }
+
+            if (cloud != null && cloud.Length == 256 * 256 && (TrackProgress >= 1.0 || px == null || px.Length == 0))
+            {
+                // Final cumulative green phosphor cloud
+                if (_cloudBitmap == null || _cachedDensityCloud != cloud)
+                {
+                    _cloudBitmap ??= new WriteableBitmap(
+                        new PixelSize(256, 256),
+                        new Vector(96, 96),
+                        PixelFormat.Bgra8888,
+                        AlphaFormat.Premul);
+
+                    using (var buf = _cloudBitmap.Lock())
+                    {
+                        unsafe
+                        {
+                            uint* ptr = (uint*)buf.Address;
+                            for (int i = 0; i < 256 * 256; i++)
+                            {
+                                byte g = cloud[i];
+                                ptr[i] = g > 0 ? (0xFF000000u | ((uint)g << 8)) : 0u;
+                            }
+                        }
+                    }
+                    _cachedDensityCloud = cloud;
+                }
+
+                Rect destRect = new Rect(centerX - radius, centerY - radius, radius * 2, radius * 2);
+                context.DrawImage(_cloudBitmap, destRect);
+            }
+            else if (px != null && py != null && px.Length > 0 && py.Length > 0)
+            {
+                // High-resolution live oscilloscope trace (5000 points with phosphor decay)
                 int count = Math.Min(px.Length, py.Length);
+                double scale = radius / 0.77815;
+
                 for (int i = 0; i < count; i++)
                 {
-                    double x = centerX + px[i] * radius;
-                    double y = centerY - py[i] * radius;
-                    context.DrawRectangle(PhosphorGlowBrush, null, new Rect(x - 1, y - 1, 3, 3));
-                    context.DrawRectangle(PhosphorCoreBrush, null, new Rect(x, y, 1.2, 1.2));
+                    double x = centerX + px[i] * scale;
+                    double y = centerY + py[i] * scale;
+
+                    int paletteIdx = (i * 16) / count;
+                    var brush = PhosphorPalette[paletteIdx];
+                    context.DrawRectangle(brush, null, new Rect(x - 0.75, y - 0.75, 1.5, 1.5));
                 }
             }
         }
 
         // Tri-Color Phase Correlation Bar at bottom
-        double barY = height - 20;
+        double barY = height - 22;
         double barLeft = 14;
         double barRight = width - 14;
         double barWidth = barRight - barLeft;
-        double barH = 7;
+        double barH = 8;
 
-        // Segments: -1 to -0.2 (Red, 40%), -0.2 to +0.2 (Yellow, 20%), +0.2 to +1.0 (Green, 40%)
-        double redW = barWidth * 0.40;
-        double yellowW = barWidth * 0.20;
+        // Segments: -1 to -0.19 (Red, 40.5%), -0.19 to +0.20 (Yellow, 19.5%), +0.20 to +1.0 (Green, 40%)
+        double redW = barWidth * 0.405;
+        double yellowW = barWidth * 0.195;
         double greenW = barWidth * 0.40;
 
         context.FillRectangle(CorrRedBrush, new Rect(barLeft, barY, redW, barH));
         context.FillRectangle(CorrYellowBrush, new Rect(barLeft + redW, barY, yellowW, barH));
         context.FillRectangle(CorrGreenBrush, new Rect(barLeft + redW + yellowW, barY, greenW, barH));
 
-        // Correlation Cursor Tick
+        // Correlation Cursor on the bar:
         double clampedCorr = Math.Clamp(Correlation, -1.0, 1.0);
         double cursorX = barLeft + ((clampedCorr + 1.0) / 2.0) * barWidth;
-        context.DrawLine(CursorPen, new Point(cursorX, barY - 4), new Point(cursorX, barY + barH + 4));
+        context.DrawLine(CursorPen, new Point(cursorX, barY - 2), new Point(cursorX, barY + barH + 2));
+
+        // Green Phosphor Correlation comb / indicator above the bar (height 10px, barY - 12 to barY - 3)
+        double combTop = barY - 12;
+        double combBottom = barY - 3;
+        if (TrackProgress >= 1.0 || _corrHistoryCount == 0)
+        {
+            // Final single green vertical tick line at final correlation
+            context.DrawLine(PhosphorPens[^1], new Point(cursorX, combTop), new Point(cursorX, combBottom));
+        }
+        else
+        {
+            // Live correlation history comb
+            for (int i = 0; i < _corrHistoryCount; i++)
+            {
+                int pIdx = (i * 16) / Math.Max(1, _corrHistoryCount);
+                var pen = PhosphorPens[Math.Clamp(pIdx, 0, 15)];
+                double cX = barLeft + ((Math.Clamp(_corrHistory[i], -1.0, 1.0) + 1.0) / 2.0) * barWidth;
+                context.DrawLine(pen, new Point(cX, combTop), new Point(cX, combBottom));
+            }
+        }
 
         // Labels: -1 (Red), 0 (Yellow), +1 (Green)
         DrawText(context, "-1", tf, 9, CorrRedBrush, barLeft, barY + barH + 2);

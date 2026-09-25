@@ -32,10 +32,8 @@ public sealed class AudioAnalysisEngine
     private readonly double[] _peakHoldSpectrumDb = new double[FftSize / 2];
     private int _spectrumFftCount;
 
-    private readonly float[] _lastInterleavedBlock = new float[1024];
-    private int _lastInterleavedCount;
-    private readonly float[] _goniometerX = new float[256];
-    private readonly float[] _goniometerY = new float[256];
+    private readonly float[] _goniometerX = new float[StereoAnalyzer.LivePointCount];
+    private readonly float[] _goniometerY = new float[StereoAnalyzer.LivePointCount];
 
     public const int HistoryBinCount = 512;
     private readonly double[] _peakHistory = new double[HistoryBinCount];
@@ -78,11 +76,6 @@ public sealed class AudioAnalysisEngine
         if (_channelCount >= 2)
         {
             _stereoAnalyzer.ProcessInterleaved(interleavedSamples);
-
-            // Cache latest samples for on-demand goniometer calculation
-            int copyLen = Math.Min(interleavedSamples.Length, _lastInterleavedBlock.Length);
-            interleavedSamples.Slice(0, copyLen).CopyTo(_lastInterleavedBlock);
-            _lastInterleavedCount = copyLen;
         }
 
         // Perform periodic FFT on mono downmix
@@ -213,13 +206,10 @@ public sealed class AudioAnalysisEngine
         float[] gonioX = new float[_goniometerX.Length];
         float[] gonioY = new float[_goniometerY.Length];
 
-        if (_channelCount >= 2 && _lastInterleavedCount > 0)
+        if (_channelCount >= 2)
         {
-            _stereoAnalyzer.GenerateGoniometerPoints(_lastInterleavedBlock.AsSpan(0, _lastInterleavedCount), _goniometerX, _goniometerY);
+            _stereoAnalyzer.GenerateGoniometerPoints(gonioX, gonioY);
         }
-
-        Array.Copy(_goniometerX, gonioX, gonioX.Length);
-        Array.Copy(_goniometerY, gonioY, gonioY.Length);
 
         double[] peakHistoryCopy = new double[HistoryBinCount];
         Array.Copy(_peakHistory, peakHistoryCopy, HistoryBinCount);

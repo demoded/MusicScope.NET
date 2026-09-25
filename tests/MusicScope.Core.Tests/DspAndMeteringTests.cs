@@ -81,6 +81,55 @@ public class DspAndMeteringTests
     }
 
     [Fact]
+    public void StereoAnalyzer_Generates_DensityCloud_And_5000_LivePoints()
+    {
+        var analyzer = new StereoAnalyzer();
+
+        // Feed 10,000 stereo frames of a stereo panned signal
+        int frames = 10000;
+        double[] stereo = new double[frames * 2];
+        for (int i = 0; i < frames; i++)
+        {
+            stereo[i * 2] = 0.6 * Math.Sin(2.0 * Math.PI * 440.0 * i / 48000.0);
+            stereo[i * 2 + 1] = 0.4 * Math.Cos(2.0 * Math.PI * 440.0 * i / 48000.0);
+        }
+
+        analyzer.ProcessInterleaved(stereo);
+
+        float[] liveX = new float[StereoAnalyzer.LivePointCount];
+        float[] liveY = new float[StereoAnalyzer.LivePointCount];
+        analyzer.GenerateGoniometerPoints(liveX, liveY);
+
+        // Verify live points were populated with non-zero coordinates
+        bool hasNonZeroLive = false;
+        for (int i = 0; i < liveX.Length; i++)
+        {
+            if (liveX[i] != 0f || liveY[i] != 0f)
+            {
+                hasNonZeroLive = true;
+                break;
+            }
+        }
+        Assert.True(hasNonZeroLive);
+
+        // Verify density cloud is 256x256 and has non-zero intensity
+        var result = analyzer.CalculateResult();
+        Assert.NotNull(result.DensityCloud);
+        Assert.Equal(StereoAnalyzer.DensityGridSize * StereoAnalyzer.DensityGridSize, result.DensityCloud.Length);
+
+        bool hasNonZeroCloud = false;
+        for (int i = 0; i < result.DensityCloud.Length; i++)
+        {
+            if (result.DensityCloud[i] > 0)
+            {
+                hasNonZeroCloud = true;
+                break;
+            }
+        }
+        Assert.True(hasNonZeroCloud);
+    }
+
+    [Fact]
     public void TruePeakMeter_Detects_InterSample_Peak_Exceeding_Sample_Peak()
     {
         var meter = new TruePeakMeter(channelCount: 1);
