@@ -2,7 +2,9 @@
 
 A modern, high-precision, cross-platform audio analyzer and acoustic measurement suite built on **.NET 10** and **AvaloniaUI 12**.
 
-This project is a complete modern rewrite of the original **XiVideo MusicScope v.2.1.0** (XiVero) audio analyzer, re-implemented from the ground up as a clean, local-first, open-source desktop application targeting **Windows**, **macOS** (Apple Silicon & Intel), and **Linux**.
+This project is a complete modern rewrite of the original **XiVero MusicScope v2.1.0** audio analyzer, re-implemented from the ground up as a clean, local-first, open-source desktop application targeting **Windows**, **macOS** (Apple Silicon & Intel), and **Linux**.
+
+![MusicScope.NET](assets/dotnet_rewrite.jpg)
 
 ---
 
@@ -32,6 +34,18 @@ This project is a complete modern rewrite of the original **XiVideo MusicScope v
 * **Universal Audio Codec Support**: Native cross-platform **FFmpeg** integration streaming 32-bit floating-point audio data for WAV, AIFF, FLAC, ALAC, MP3, AAC, DSD (DSF/DFF), OGG, and Opus.
 * **DAW Plugin TCP Bridge**: Built-in asynchronous socket server on port `8989` providing 1:1 drop-in binary compatibility with DAW streaming plugins.
 * **Multi-Format Export**: Export analysis results to CSV spreadsheets, structured JSON metadata, or formatted text reports.
+
+---
+
+## Visual Parity & Comparison
+
+MusicScope.NET is engineered for 1:1 visual and mathematical parity with the original reference suite while providing modern 60 FPS vector rendering and native cross-platform performance:
+
+| MusicScope.NET (.NET 10 / AvaloniaUI) | Original XiVero MusicScope v2.1.0 (Java) |
+| :---: | :---: |
+| [![MusicScope.NET](assets/dotnet_rewrite.jpg)](assets/dotnet_rewrite.jpg) | [![Original XiVero MusicScope](assets/original_java_app.jpg)](assets/original_java_app.jpg) |
+
+*Side-by-side comparison of MusicScope.NET and the original XiVero release analyzing the same 16-bit / 44.1 kHz FLAC recording, demonstrating matching True Peak & RMS levels, S-Mode loudness histogram, polar history dial, Mid/Side goniometer, and spectrogram waterfall.*
 
 ---
 
