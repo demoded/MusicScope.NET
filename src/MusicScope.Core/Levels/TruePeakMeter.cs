@@ -1,88 +1,45 @@
 using System;
+using MusicScope.Core.DSP;
 
 namespace MusicScope.Core.Levels;
 
 /// <summary>
-/// ITU-R BS.1770-4 compliant 4x oversampling True Peak Meter.
-/// Detects inter-sample peaks that exceed 0 dBFS through polyphase FIR interpolation.
+/// Bit-exact port of XiVideo MusicScope's LevelsModule.
+/// Uses cascaded polyphase FIR interpolation filters to detect inter-sample True Peak
+/// and calculate the running CREST Avg. and RMS levels.
 /// </summary>
 public sealed class TruePeakMeter
 {
-    private const int OversamplingFactor = 4;
-    private const int SubfilterLength = 16; // 64-tap total FIR filter / 4 phases = 16 taps per phase
-
-    // Precomputed 4x polyphase interpolation coefficients (windowed-sinc)
-    private static readonly double[][] PolyphaseCoefficients = InitializeCoefficients();
-    private static readonly double[] CoeffsRev0 = CreateReversedCoeffs(0);
-    private static readonly double[] CoeffsRev1 = CreateReversedCoeffs(1);
-    private static readonly double[] CoeffsRev2 = CreateReversedCoeffs(2);
-    private static readonly double[] CoeffsRev3 = CreateReversedCoeffs(3);
-
-    private static double[] CreateReversedCoeffs(int phase)
-    {
-        double[] rev = new double[SubfilterLength];
-        for (int i = 0; i < SubfilterLength; i++)
-        {
-            rev[i] = PolyphaseCoefficients[phase][SubfilterLength - 1 - i];
-        }
-        return rev;
-    }
-
-    private static double[][] InitializeCoefficients()
-    {
-        int totalTaps = OversamplingFactor * SubfilterLength;
-        double cutoff = 0.125; // 1 / (2 * OversamplingFactor)
-        double center = (totalTaps - 1) / 2.0;
-
-        double[][] poly = new double[OversamplingFactor][];
-        for (int p = 0; p < OversamplingFactor; p++)
-        {
-            poly[p] = new double[SubfilterLength];
-            for (int k = 0; k < SubfilterLength; k++)
-            {
-                int n = k * OversamplingFactor + p;
-                double t = n - center;
-                double sinc = (Math.Abs(t) < 1e-9)
-                    ? 2.0 * cutoff
-                    : Math.Sin(2.0 * Math.PI * cutoff * t) / (Math.PI * t);
-
-                // Blackman window
-                double a = 2.0 * Math.PI * n / (totalTaps - 1);
-                double w = 0.42 - 0.5 * Math.Cos(a) + 0.08 * Math.Cos(2.0 * a);
-                poly[p][k] = sinc * w * OversamplingFactor;
-            }
-
-            // Normalize branch for unity DC gain
-            double sum = 0.0;
-            for (int k = 0; k < SubfilterLength; k++)
-                sum += poly[p][k];
-
-            if (Math.Abs(sum) > 1e-9)
-            {
-                for (int k = 0; k < SubfilterLength; k++)
-                    poly[p][k] /= sum;
-            }
-        }
-
-        return poly;
-    }
+    private const int BlockSize = 2048;
 
     private readonly int _channelCount;
-    // Contiguous double-buffered delay history: [channel][32]
-    private readonly double[][] _history;
-    private readonly int[] _historyIndex;
+    private readonly double _sampleRate;
 
-    private readonly double[] _samplePeakMax;
-    private readonly double[] _truePeakMax;
-    private readonly double[] _sumSquares;
-    private readonly double[] _currentBlockPeak;
-    private readonly double[] _currentBlockRms;
-    private long _totalFrames;
+    // Polyphase filters ported from XiVideo MusicScope
+    private readonly MusicScopePolyphaseFilter _filter0 = new(0); // 44.1k stage 1 (90 taps)
+    private readonly MusicScopePolyphaseFilter _filter1 = new(1); // 44.1k stage 2 / 88.2k (54 taps)
+    private readonly MusicScopePolyphaseFilter _filter2 = new(2); // 48k stage 1 (80 taps)
+    private readonly MusicScopePolyphaseFilter _filter3 = new(3); // 48k stage 2 / 96k (52 taps)
 
-    private const int CrestBlockSize = 2048;
-    private int _crestSampleInBlock;
-    private readonly double[] _crestBlockPeak = new double[2];
-    private readonly double[] _crestBlockSumSq = new double[2];
+    // Block buffers
+    private readonly double[] _inBlockL = new double[BlockSize];
+    private readonly double[] _inBlockR = new double[BlockSize];
+    private readonly double[] _stage1L = new double[BlockSize * 2];
+    private readonly double[] _stage1R = new double[BlockSize * 2];
+    private int _inBlockPos;
+
+    // Peaks and RMS
+    private readonly double[] _samplePeakMax = new double[2];
+    private readonly double[] _truePeakMax = new double[2];
+    private readonly double[] _currentBlockPeak = new double[2];
+    private readonly double[] _currentBlockRms = new double[2];
+
+    // Track energy accumulators (matching DemuxUtils and LeadingZeros in LevelsModule.java)
+    private double _demuxUtils;   // Left energy sum
+    private double _leadingZeros; // Right energy sum
+    private long _sampleInfo;     // Block count
+
+    // CREST factor state (matching LevelsModule.java)
     private readonly double[] _crestRingBuffer = new double[8];
     private int _crestRingIndex;
     private int _crestWarmupCount;
@@ -102,257 +59,281 @@ public sealed class TruePeakMeter
     public double CrestAvgDb => _crestAvgDb;
     public double CurrentInstantCrestDb => _currentInstantCrestDb;
 
-    public TruePeakMeter(int channelCount = 2)
+    public TruePeakMeter(int channelCount = 2, double sampleRate = 44100.0)
     {
         if (channelCount <= 0)
             throw new ArgumentOutOfRangeException(nameof(channelCount));
 
         _channelCount = channelCount;
-        _history = new double[channelCount][];
-        _historyIndex = new int[channelCount];
-        _samplePeakMax = new double[channelCount];
-        _truePeakMax = new double[channelCount];
-        _sumSquares = new double[channelCount];
-        _currentBlockPeak = new double[channelCount];
-        _currentBlockRms = new double[channelCount];
-
-        for (int ch = 0; ch < channelCount; ch++)
-        {
-            _history[ch] = new double[SubfilterLength * 2]; // 32 elements for contiguous slicing
-        }
+        _sampleRate = sampleRate;
 
         Reset();
     }
 
-    [System.Runtime.CompilerServices.MethodImpl(System.Runtime.CompilerServices.MethodImplOptions.AggressiveInlining)]
-    private static double EvaluatePhase(double[] cRev, double[] hist, int offset)
-    {
-        return cRev[0] * hist[offset]
-             + cRev[1] * hist[offset + 1]
-             + cRev[2] * hist[offset + 2]
-             + cRev[3] * hist[offset + 3]
-             + cRev[4] * hist[offset + 4]
-             + cRev[5] * hist[offset + 5]
-             + cRev[6] * hist[offset + 6]
-             + cRev[7] * hist[offset + 7]
-             + cRev[8] * hist[offset + 8]
-             + cRev[9] * hist[offset + 9]
-             + cRev[10] * hist[offset + 10]
-             + cRev[11] * hist[offset + 11]
-             + cRev[12] * hist[offset + 12]
-             + cRev[13] * hist[offset + 13]
-             + cRev[14] * hist[offset + 14]
-             + cRev[15] * hist[offset + 15];
-    }
-
     /// <summary>
-    /// Processes interleaved samples and updates Sample Peak and True Peak.
+    /// Processes interleaved double samples.
     /// </summary>
+    [System.Runtime.CompilerServices.MethodImpl(System.Runtime.CompilerServices.MethodImplOptions.AggressiveOptimization)]
     public void ProcessInterleaved(ReadOnlySpan<double> samples)
     {
-        int frameCount = samples.Length / _channelCount;
-        if (frameCount == 0) return;
+        int totalFrames = samples.Length / _channelCount;
+        int frameOffset = 0;
 
-        double[] blockSumSq = new double[_channelCount];
-        double[] blockPeak = new double[_channelCount];
-
-        for (int frame = 0; frame < frameCount; frame++)
+        if (_channelCount == 2)
         {
-            int baseIdx = frame * _channelCount;
-            for (int ch = 0; ch < _channelCount; ch++)
+            double peak0 = _samplePeakMax[0];
+            double peak1 = _samplePeakMax[1];
+
+            while (frameOffset < totalFrames)
             {
-                double s = samples[baseIdx + ch];
-                double absS = Math.Abs(s);
+                int framesToCopy = Math.Min(totalFrames - frameOffset, BlockSize - _inBlockPos);
+                int baseSampleIdx = frameOffset << 1;
 
-                if (absS > blockPeak[ch])
-                    blockPeak[ch] = absS;
-
-                blockSumSq[ch] += s * s;
-
-                if (absS > _samplePeakMax[ch])
-                    _samplePeakMax[ch] = absS;
-
-                if (absS > _truePeakMax[ch])
-                    _truePeakMax[ch] = absS;
-
-                _sumSquares[ch] += s * s;
-
-                // Contiguous double-buffer write
-                int writeIdx = _historyIndex[ch];
-                double[] hist = _history[ch];
-                hist[writeIdx] = s;
-                hist[writeIdx + 16] = s;
-                _historyIndex[ch] = (writeIdx + 1) & 15;
-
-                // Skip FIR if signal is small and cannot exceed current peak
-                if (absS >= _truePeakMax[ch] * 0.707 || absS >= 0.5 || _truePeakMax[ch] < 0.1)
+                for (int i = 0; i < framesToCopy; i++)
                 {
-                    int offset = writeIdx + 1;
-                    double p0 = Math.Abs(EvaluatePhase(CoeffsRev0, hist, offset));
-                    double p1 = Math.Abs(EvaluatePhase(CoeffsRev1, hist, offset));
-                    double p2 = Math.Abs(EvaluatePhase(CoeffsRev2, hist, offset));
-                    double p3 = Math.Abs(EvaluatePhase(CoeffsRev3, hist, offset));
+                    int idx = baseSampleIdx + (i << 1);
+                    double sL = samples[idx];
+                    double sR = samples[idx + 1];
 
-                    double maxInterp = Math.Max(Math.Max(p0, p1), Math.Max(p2, p3));
-                    if (maxInterp > _truePeakMax[ch])
-                    {
-                        _truePeakMax[ch] = maxInterp;
-                    }
+                    double absL = sL < 0.0 ? -sL : sL;
+                    double absR = sR < 0.0 ? -sR : sR;
+                    if (absL > peak0) peak0 = absL;
+                    if (absR > peak1) peak1 = absR;
+
+                    _inBlockL[_inBlockPos + i] = sL;
+                    _inBlockR[_inBlockPos + i] = sR;
+                }
+
+                _inBlockPos += framesToCopy;
+                frameOffset += framesToCopy;
+
+                if (_inBlockPos == BlockSize)
+                {
+                    ProcessBlock(BlockSize);
+                    _inBlockPos = 0;
                 }
             }
 
-            // CREST factor block tracking matching XiVideo MusicScope LevelsModule
-            double s0 = samples[baseIdx];
-            double absS0 = Math.Abs(s0);
-            if (absS0 > _crestBlockPeak[0])
-                _crestBlockPeak[0] = absS0;
-            _crestBlockSumSq[0] += s0 * s0;
-
-            if (_channelCount > 1)
-            {
-                double s1 = samples[baseIdx + 1];
-                double absS1 = Math.Abs(s1);
-                if (absS1 > _crestBlockPeak[1])
-                    _crestBlockPeak[1] = absS1;
-                _crestBlockSumSq[1] += s1 * s1;
-            }
-
-            _crestSampleInBlock++;
-            if (_crestSampleInBlock >= CrestBlockSize)
-            {
-                UpdateCrestBlock();
-            }
-
-            _totalFrames++;
+            _samplePeakMax[0] = peak0;
+            _samplePeakMax[1] = peak1;
         }
-
-        for (int ch = 0; ch < _channelCount; ch++)
+        else
         {
-            _currentBlockPeak[ch] = blockPeak[ch];
-            _currentBlockRms[ch] = Math.Sqrt(blockSumSq[ch] / frameCount);
+            double peak0 = _samplePeakMax[0];
+
+            while (frameOffset < totalFrames)
+            {
+                int framesToCopy = Math.Min(totalFrames - frameOffset, BlockSize - _inBlockPos);
+                int baseSampleIdx = frameOffset * _channelCount;
+
+                for (int i = 0; i < framesToCopy; i++)
+                {
+                    int idx = baseSampleIdx + i * _channelCount;
+                    double sL = samples[idx];
+                    double absL = sL < 0.0 ? -sL : sL;
+                    if (absL > peak0) peak0 = absL;
+
+                    _inBlockL[_inBlockPos + i] = sL;
+                    _inBlockR[_inBlockPos + i] = sL;
+                }
+
+                _inBlockPos += framesToCopy;
+                frameOffset += framesToCopy;
+
+                if (_inBlockPos == BlockSize)
+                {
+                    ProcessBlock(BlockSize);
+                    _inBlockPos = 0;
+                }
+            }
+
+            _samplePeakMax[0] = peak0;
+            _samplePeakMax[1] = peak0;
         }
     }
 
     /// <summary>
     /// Processes interleaved float samples.
     /// </summary>
+    [System.Runtime.CompilerServices.MethodImpl(System.Runtime.CompilerServices.MethodImplOptions.AggressiveOptimization)]
     public void ProcessInterleaved(ReadOnlySpan<float> samples)
     {
-        int frameCount = samples.Length / _channelCount;
-        if (frameCount == 0) return;
+        int totalFrames = samples.Length / _channelCount;
+        int frameOffset = 0;
 
-        double[] blockSumSq = new double[_channelCount];
-        double[] blockPeak = new double[_channelCount];
-
-        for (int frame = 0; frame < frameCount; frame++)
+        if (_channelCount == 2)
         {
-            int baseIdx = frame * _channelCount;
-            for (int ch = 0; ch < _channelCount; ch++)
+            double peak0 = _samplePeakMax[0];
+            double peak1 = _samplePeakMax[1];
+
+            while (frameOffset < totalFrames)
             {
-                double s = samples[baseIdx + ch];
-                double absS = Math.Abs(s);
+                int framesToCopy = Math.Min(totalFrames - frameOffset, BlockSize - _inBlockPos);
+                int baseSampleIdx = frameOffset << 1;
 
-                if (absS > blockPeak[ch])
-                    blockPeak[ch] = absS;
-
-                blockSumSq[ch] += s * s;
-
-                if (absS > _samplePeakMax[ch])
-                    _samplePeakMax[ch] = absS;
-
-                if (absS > _truePeakMax[ch])
-                    _truePeakMax[ch] = absS;
-
-                _sumSquares[ch] += s * s;
-
-                // Contiguous double-buffer write
-                int writeIdx = _historyIndex[ch];
-                double[] hist = _history[ch];
-                hist[writeIdx] = s;
-                hist[writeIdx + 16] = s;
-                _historyIndex[ch] = (writeIdx + 1) & 15;
-
-                // Skip FIR if signal is small and cannot exceed current peak
-                if (absS >= _truePeakMax[ch] * 0.707 || absS >= 0.5 || _truePeakMax[ch] < 0.1)
+                for (int i = 0; i < framesToCopy; i++)
                 {
-                    int offset = writeIdx + 1;
-                    double p0 = Math.Abs(EvaluatePhase(CoeffsRev0, hist, offset));
-                    double p1 = Math.Abs(EvaluatePhase(CoeffsRev1, hist, offset));
-                    double p2 = Math.Abs(EvaluatePhase(CoeffsRev2, hist, offset));
-                    double p3 = Math.Abs(EvaluatePhase(CoeffsRev3, hist, offset));
+                    int idx = baseSampleIdx + (i << 1);
+                    double sL = samples[idx];
+                    double sR = samples[idx + 1];
 
-                    double maxInterp = Math.Max(Math.Max(p0, p1), Math.Max(p2, p3));
-                    if (maxInterp > _truePeakMax[ch])
-                    {
-                        _truePeakMax[ch] = maxInterp;
-                    }
+                    double absL = sL < 0.0 ? -sL : sL;
+                    double absR = sR < 0.0 ? -sR : sR;
+                    if (absL > peak0) peak0 = absL;
+                    if (absR > peak1) peak1 = absR;
+
+                    _inBlockL[_inBlockPos + i] = sL;
+                    _inBlockR[_inBlockPos + i] = sR;
+                }
+
+                _inBlockPos += framesToCopy;
+                frameOffset += framesToCopy;
+
+                if (_inBlockPos == BlockSize)
+                {
+                    ProcessBlock(BlockSize);
+                    _inBlockPos = 0;
                 }
             }
 
-            // CREST factor block tracking matching XiVideo MusicScope LevelsModule
-            double s0 = samples[baseIdx];
-            double absS0 = Math.Abs(s0);
-            if (absS0 > _crestBlockPeak[0])
-                _crestBlockPeak[0] = absS0;
-            _crestBlockSumSq[0] += s0 * s0;
-
-            if (_channelCount > 1)
-            {
-                double s1 = samples[baseIdx + 1];
-                double absS1 = Math.Abs(s1);
-                if (absS1 > _crestBlockPeak[1])
-                    _crestBlockPeak[1] = absS1;
-                _crestBlockSumSq[1] += s1 * s1;
-            }
-
-            _crestSampleInBlock++;
-            if (_crestSampleInBlock >= CrestBlockSize)
-            {
-                UpdateCrestBlock();
-            }
-
-            _totalFrames++;
+            _samplePeakMax[0] = peak0;
+            _samplePeakMax[1] = peak1;
         }
-
-        for (int ch = 0; ch < _channelCount; ch++)
+        else
         {
-            _currentBlockPeak[ch] = blockPeak[ch];
-            _currentBlockRms[ch] = Math.Sqrt(blockSumSq[ch] / frameCount);
+            double peak0 = _samplePeakMax[0];
+
+            while (frameOffset < totalFrames)
+            {
+                int framesToCopy = Math.Min(totalFrames - frameOffset, BlockSize - _inBlockPos);
+                int baseSampleIdx = frameOffset * _channelCount;
+
+                for (int i = 0; i < framesToCopy; i++)
+                {
+                    int idx = baseSampleIdx + i * _channelCount;
+                    double sL = samples[idx];
+                    double absL = sL < 0.0 ? -sL : sL;
+                    if (absL > peak0) peak0 = absL;
+
+                    _inBlockL[_inBlockPos + i] = sL;
+                    _inBlockR[_inBlockPos + i] = sL;
+                }
+
+                _inBlockPos += framesToCopy;
+                frameOffset += framesToCopy;
+
+                if (_inBlockPos == BlockSize)
+                {
+                    ProcessBlock(BlockSize);
+                    _inBlockPos = 0;
+                }
+            }
+
+            _samplePeakMax[0] = peak0;
+            _samplePeakMax[1] = peak0;
         }
     }
 
-    private void UpdateCrestBlock()
+    /// <summary>
+    /// Processes a block of samples through MusicScope's exact oversampling filter and CREST algorithm.
+    /// </summary>
+    [System.Runtime.CompilerServices.MethodImpl(System.Runtime.CompilerServices.MethodImplOptions.AggressiveOptimization)]
+    private void ProcessBlock(int count)
     {
-        int count = _crestSampleInBlock;
         if (count == 0) return;
 
-        double pL = _crestBlockPeak[0];
-        double pR = _channelCount > 1 ? _crestBlockPeak[1] : 0.0;
-        double sqL = _crestBlockSumSq[0] / count;
-        double sqR = _channelCount > 1 ? _crestBlockSumSq[1] / count : sqL;
+        double d8, d7, d4, d3;
 
-        double blockPeak = pL;
-        double blockEnergy = sqL;
-        if (blockPeak < pR)
+        if (Math.Abs(_sampleRate - 44100.0) < 100.0)
         {
-            blockPeak = pR;
-            blockEnergy = sqR;
+            _filter0.Process(0, count, _inBlockL.AsSpan(0, count), _inBlockR.AsSpan(0, count), _stage1L, _stage1R);
+            var stats = _filter1.ProcessAndAccumulate(0, count * 2, _stage1L.AsSpan(0, count * 2), _stage1R.AsSpan(0, count * 2));
+            d8 = stats.MaxL;
+            d7 = stats.MaxR;
+            d4 = stats.SumSqL / (count * 4);
+            d3 = stats.SumSqR / (count * 4);
+        }
+        else if (Math.Abs(_sampleRate - 48000.0) < 100.0)
+        {
+            _filter2.Process(0, count, _inBlockL.AsSpan(0, count), _inBlockR.AsSpan(0, count), _stage1L, _stage1R);
+            var stats = _filter3.ProcessAndAccumulate(0, count * 2, _stage1L.AsSpan(0, count * 2), _stage1R.AsSpan(0, count * 2));
+            d8 = stats.MaxL;
+            d7 = stats.MaxR;
+            d4 = stats.SumSqL / (count * 4);
+            d3 = stats.SumSqR / (count * 4);
+        }
+        else if (Math.Abs(_sampleRate - 88200.0) < 100.0)
+        {
+            var stats = _filter1.ProcessAndAccumulate(1, count, _inBlockL.AsSpan(0, count), _inBlockR.AsSpan(0, count));
+            d8 = stats.MaxL;
+            d7 = stats.MaxR;
+            d4 = stats.SumSqL / (count * 2);
+            d3 = stats.SumSqR / (count * 2);
+        }
+        else if (Math.Abs(_sampleRate - 96000.0) < 100.0)
+        {
+            var stats = _filter3.ProcessAndAccumulate(1, count, _inBlockL.AsSpan(0, count), _inBlockR.AsSpan(0, count));
+            d8 = stats.MaxL;
+            d7 = stats.MaxR;
+            d4 = stats.SumSqL / (count * 2);
+            d3 = stats.SumSqR / (count * 2);
+        }
+        else
+        {
+            d8 = 0.0;
+            d7 = 0.0;
+            d4 = 0.0;
+            d3 = 0.0;
+            for (int n = 0; n < count; n++)
+            {
+                double d9 = _inBlockL[n];
+                double d10 = _inBlockR[n];
+                double abs9 = Math.Abs(d9);
+                double abs10 = Math.Abs(d10);
+                if (d8 < abs9) d8 = abs9;
+                if (d7 < abs10) d7 = abs10;
+                d4 += d9 * d9;
+                d3 += d10 * d10;
+            }
+            d4 /= count;
+            d3 /= count;
         }
 
-        double blockRms = Math.Sqrt(blockEnergy);
-        double crestLinear = blockRms > 0.0 ? (blockPeak / blockRms) : 0.0;
+        _demuxUtils += d4;
+        _leadingZeros += d3;
+        _sampleInfo++;
 
-        _crestRingBuffer[_crestRingIndex] = crestLinear;
+        if (d8 > _truePeakMax[0]) _truePeakMax[0] = d8;
+        if (d7 > _truePeakMax[1]) _truePeakMax[1] = d7;
+
+        _currentBlockPeak[0] = d8;
+        _currentBlockPeak[1] = d7;
+        _currentBlockRms[0] = Math.Sqrt(d4);
+        _currentBlockRms[1] = Math.Sqrt(d3);
+
+        // CREST calculation matching LevelsModule.java lines 268-288
+        double d17 = d8;
+        double d18 = d4;
+        if (d17 < d7)
+        {
+            d17 = d7;
+            d18 = d3;
+        }
+
+        double blockRms = Math.Sqrt(d18);
+        double crestBlock = blockRms > 0.0 ? (d17 / blockRms) : 0.0;
+
+        _crestRingBuffer[_crestRingIndex] = crestBlock;
         _crestRingIndex = (_crestRingIndex + 1) & 7;
 
-        double slidingAvg = 0.0;
+        double d19 = 0.0;
         for (int k = 0; k < 8; k++)
         {
-            slidingAvg += _crestRingBuffer[k];
+            d19 += _crestRingBuffer[k];
         }
-        slidingAvg /= 8.0;
+        d19 /= 8.0;
 
-        if (slidingAvg > 0.001)
+        if (d19 > 0.001)
         {
             if (_crestWarmupCount < 8)
             {
@@ -360,32 +341,27 @@ public sealed class TruePeakMeter
             }
             else
             {
-                _crestSum += slidingAvg;
+                _crestSum += d19;
                 _crestAvgDb = 20.0 * Math.Log10(_crestSum / _crestCount);
                 _crestCount++;
             }
-            _currentInstantCrestDb = 20.0 * Math.Log10(slidingAvg);
+            _currentInstantCrestDb = 20.0 * Math.Log10(d19);
         }
         else
         {
             _currentInstantCrestDb = 0.0;
         }
-
-        _crestSampleInBlock = 0;
-        _crestBlockPeak[0] = 0.0;
-        _crestBlockPeak[1] = 0.0;
-        _crestBlockSumSq[0] = 0.0;
-        _crestBlockSumSq[1] = 0.0;
     }
 
     /// <summary>
-    /// Returns the current peak and RMS results.
+    /// Returns the complete peak, true peak, RMS, and CREST measurement results.
     /// </summary>
     public LevelsResult CalculateResult()
     {
-        if (_crestSampleInBlock >= 256)
+        if (_inBlockPos > 0)
         {
-            UpdateCrestBlock();
+            ProcessBlock(_inBlockPos);
+            _inBlockPos = 0;
         }
 
         double spLeftDb = _samplePeakMax[0] > 1e-6 ? 20.0 * Math.Log10(_samplePeakMax[0]) : -100.0;
@@ -394,26 +370,23 @@ public sealed class TruePeakMeter
         double tpLeftDb = _truePeakMax[0] > 1e-6 ? 20.0 * Math.Log10(_truePeakMax[0]) : -100.0;
         double tpRightDb = _channelCount > 1 && _truePeakMax[1] > 1e-6 ? 20.0 * Math.Log10(_truePeakMax[1]) : tpLeftDb;
 
-        double rmsLeft = _totalFrames > 0 ? Math.Sqrt(_sumSquares[0] / _totalFrames) : 0.0;
-        double rmsRight = _channelCount > 1 && _totalFrames > 0 ? Math.Sqrt(_sumSquares[1] / _totalFrames) : rmsLeft;
+        double rmsLeft = _sampleInfo > 0 ? Math.Sqrt(_demuxUtils / _sampleInfo) : 0.0;
+        double rmsRight = _channelCount > 1 && _sampleInfo > 0 ? Math.Sqrt(_leadingZeros / _sampleInfo) : rmsLeft;
 
         double rmsLeftDb = rmsLeft > 1e-6 ? 20.0 * Math.Log10(rmsLeft) : -100.0;
         double rmsRightDb = rmsRight > 1e-6 ? 20.0 * Math.Log10(rmsRight) : -100.0;
 
-        double maxPeak = Math.Max(_samplePeakMax[0], _channelCount > 1 ? _samplePeakMax[1] : 0.0);
-        double avgRms = (rmsLeft + rmsRight) / 2.0;
-        double crestDb = (_crestCount > 1) ? _crestAvgDb : ((maxPeak > 1e-6 && avgRms > 1e-6) ? 20.0 * Math.Log10(maxPeak / avgRms) : 0.0);
-
+        double crestDb = (_crestCount > 1) ? _crestAvgDb : 0.0;
         double drDb = Math.Max(0.0, Math.Round(crestDb, 1));
 
         return new LevelsResult
         {
-            SamplePeakLeftDb = Math.Round(spLeftDb, 2),
-            SamplePeakRightDb = Math.Round(spRightDb, 2),
-            TruePeakLeftDb = Math.Round(tpLeftDb, 2),
-            TruePeakRightDb = Math.Round(tpRightDb, 2),
-            RmsLeftDb = Math.Round(rmsLeftDb, 2),
-            RmsRightDb = Math.Round(rmsRightDb, 2),
+            SamplePeakLeftDb = Math.Round(spLeftDb, 1),
+            SamplePeakRightDb = Math.Round(spRightDb, 1),
+            TruePeakLeftDb = Math.Round(tpLeftDb, 1),
+            TruePeakRightDb = Math.Round(tpRightDb, 1),
+            RmsLeftDb = Math.Round(rmsLeftDb, 1),
+            RmsRightDb = Math.Round(rmsRightDb, 1),
             CrestFactorDb = Math.Round(crestDb, 1),
             DynamicRangeDb = drDb
         };
@@ -424,17 +397,19 @@ public sealed class TruePeakMeter
     /// </summary>
     public void Reset()
     {
-        for (int ch = 0; ch < _channelCount; ch++)
-        {
-            Array.Clear(_history[ch], 0, _history[ch].Length);
-            _historyIndex[ch] = 0;
-            _samplePeakMax[ch] = 0.0;
-            _truePeakMax[ch] = 0.0;
-            _sumSquares[ch] = 0.0;
-        }
-        _crestSampleInBlock = 0;
-        Array.Clear(_crestBlockPeak);
-        Array.Clear(_crestBlockSumSq);
+        _filter0.Reset();
+        _filter1.Reset();
+        _filter2.Reset();
+        _filter3.Reset();
+        _inBlockPos = 0;
+        Array.Clear(_inBlockL);
+        Array.Clear(_inBlockR);
+        Array.Clear(_stage1L);
+        Array.Clear(_stage1R);
+        Array.Clear(_samplePeakMax);
+        Array.Clear(_truePeakMax);
+        Array.Clear(_currentBlockPeak);
+        Array.Clear(_currentBlockRms);
         Array.Clear(_crestRingBuffer);
         _crestRingIndex = 0;
         _crestWarmupCount = 0;
@@ -442,6 +417,8 @@ public sealed class TruePeakMeter
         _crestCount = 1;
         _crestAvgDb = 0.0;
         _currentInstantCrestDb = 0.0;
-        _totalFrames = 0;
+        _demuxUtils = 0.0;
+        _leadingZeros = 0.0;
+        _sampleInfo = 0;
     }
 }

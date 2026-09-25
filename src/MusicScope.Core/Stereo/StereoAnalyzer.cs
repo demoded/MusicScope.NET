@@ -72,10 +72,30 @@ public sealed class StereoAnalyzer
         double frameSumR2 = 0.0;
         double frameSumLR = 0.0;
 
-        for (int i = 0; i < frameCount; i++)
+        int i = 0;
+        int unrolledEnd = frameCount - (frameCount & 3);
+        for (; i < unrolledEnd; i += 4)
         {
-            double l = stereoSamples[i * 2];
-            double r = stereoSamples[i * 2 + 1];
+            int idx = i << 1;
+            double l0 = stereoSamples[idx];
+            double r0 = stereoSamples[idx + 1];
+            double l1 = stereoSamples[idx + 2];
+            double r1 = stereoSamples[idx + 3];
+            double l2 = stereoSamples[idx + 4];
+            double r2 = stereoSamples[idx + 5];
+            double l3 = stereoSamples[idx + 6];
+            double r3 = stereoSamples[idx + 7];
+
+            frameSumL2 += l0 * l0 + l1 * l1 + l2 * l2 + l3 * l3;
+            frameSumR2 += r0 * r0 + r1 * r1 + r2 * r2 + r3 * r3;
+            frameSumLR += l0 * r0 + l1 * r1 + l2 * r2 + l3 * r3;
+        }
+
+        for (; i < frameCount; i++)
+        {
+            int idx = i << 1;
+            double l = stereoSamples[idx];
+            double r = stereoSamples[idx + 1];
 
             frameSumL2 += l * l;
             frameSumR2 += r * r;

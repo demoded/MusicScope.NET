@@ -86,6 +86,12 @@ public sealed class LoudnessMeter
         int frameCount = samples.Length / _channelCount;
         if (_channelCount == 2)
         {
+            double energy0 = _current100msEnergy[0];
+            double energy1 = _current100msEnergy[1];
+            int stepSamples = _samplesSinceLastStep;
+            long totalSamples = _totalSamplesProcessed;
+            int stepTarget = _samplesPerStep100ms;
+
             for (int frame = 0; frame < frameCount; frame++)
             {
                 double rawL = samples[frame * 2];
@@ -93,17 +99,31 @@ public sealed class LoudnessMeter
 
                 _filter.ProcessStereoSample(rawL, rawR, out double filteredL, out double filteredR);
 
-                _current100msEnergy[0] += filteredL * filteredL;
-                _current100msEnergy[1] += filteredR * filteredR;
-                _samplesSinceLastStep++;
-                _totalSamplesProcessed++;
+                energy0 += filteredL * filteredL;
+                energy1 += filteredR * filteredR;
+                stepSamples++;
+                totalSamples++;
 
-                if (_samplesSinceLastStep >= _samplesPerStep100ms)
+                if (stepSamples >= stepTarget)
                 {
+                    _current100msEnergy[0] = energy0;
+                    _current100msEnergy[1] = energy1;
                     _samplesSinceLastStep = 0;
+                    _totalSamplesProcessed = totalSamples;
+
                     EvaluateSubBlock();
+
+                    energy0 = 0.0;
+                    energy1 = 0.0;
+                    stepSamples = 0;
+                    totalSamples = _totalSamplesProcessed;
                 }
             }
+
+            _current100msEnergy[0] = energy0;
+            _current100msEnergy[1] = energy1;
+            _samplesSinceLastStep = stepSamples;
+            _totalSamplesProcessed = totalSamples;
         }
         else
         {
@@ -137,6 +157,12 @@ public sealed class LoudnessMeter
         int frameCount = samples.Length / _channelCount;
         if (_channelCount == 2)
         {
+            double energy0 = _current100msEnergy[0];
+            double energy1 = _current100msEnergy[1];
+            int stepSamples = _samplesSinceLastStep;
+            long totalSamples = _totalSamplesProcessed;
+            int stepTarget = _samplesPerStep100ms;
+
             for (int frame = 0; frame < frameCount; frame++)
             {
                 float rawL = samples[frame * 2];
@@ -144,17 +170,31 @@ public sealed class LoudnessMeter
 
                 _filter.ProcessStereoSample(rawL, rawR, out double filteredL, out double filteredR);
 
-                _current100msEnergy[0] += filteredL * filteredL;
-                _current100msEnergy[1] += filteredR * filteredR;
-                _samplesSinceLastStep++;
-                _totalSamplesProcessed++;
+                energy0 += filteredL * filteredL;
+                energy1 += filteredR * filteredR;
+                stepSamples++;
+                totalSamples++;
 
-                if (_samplesSinceLastStep >= _samplesPerStep100ms)
+                if (stepSamples >= stepTarget)
                 {
+                    _current100msEnergy[0] = energy0;
+                    _current100msEnergy[1] = energy1;
                     _samplesSinceLastStep = 0;
+                    _totalSamplesProcessed = totalSamples;
+
                     EvaluateSubBlock();
+
+                    energy0 = 0.0;
+                    energy1 = 0.0;
+                    stepSamples = 0;
+                    totalSamples = _totalSamplesProcessed;
                 }
             }
+
+            _current100msEnergy[0] = energy0;
+            _current100msEnergy[1] = energy1;
+            _samplesSinceLastStep = stepSamples;
+            _totalSamplesProcessed = totalSamples;
         }
         else
         {

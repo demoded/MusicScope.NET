@@ -43,7 +43,7 @@ public sealed class AudioAnalysisEngine
         _channelCount = channelCount;
 
         _loudnessMeter = new LoudnessMeter(sampleRate, channelCount);
-        _truePeakMeter = new TruePeakMeter(channelCount);
+        _truePeakMeter = new TruePeakMeter(channelCount, sampleRate);
         _stereoAnalyzer = new StereoAnalyzer();
 
         _fft = new FastFourierTransform(FftSize);
@@ -72,10 +72,20 @@ public sealed class AudioAnalysisEngine
 
         // Perform periodic FFT on mono downmix
         int frameCount = interleavedSamples.Length / _channelCount;
-        for (int i = 0; i < frameCount; i++)
+        int i = 0;
+        while (i < frameCount)
         {
-            _framesSinceLastFft++;
-            if (_framesSinceLastFft >= FftStride && (i + FftSize) <= frameCount)
+            int framesNeeded = FftStride - _framesSinceLastFft;
+            if (framesNeeded > 0)
+            {
+                int step = Math.Min(framesNeeded, frameCount - i);
+                _framesSinceLastFft += step;
+                i += step;
+                if (_framesSinceLastFft < FftStride)
+                    break;
+            }
+
+            if (i + FftSize <= frameCount)
             {
                 _framesSinceLastFft = 0;
 
@@ -115,7 +125,12 @@ public sealed class AudioAnalysisEngine
                     }
                 }
                 _spectrumFftCount++;
-                i += FftSize - 1; // Advance past this FFT frame
+                i += FftSize;
+            }
+            else
+            {
+                _framesSinceLastFft += (frameCount - i);
+                break;
             }
         }
     }

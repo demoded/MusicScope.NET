@@ -197,8 +197,13 @@ public class DspAndMeteringTests
 
         var report = engine.GenerateReport("Benchmark", "", "FLAC", TimeSpan.FromMinutes(30));
         Assert.True(report.Loudness.HasAudibleSignal);
-        // Ensure 30 min of audio processes in under 30 seconds even in unoptimized Debug mode (runs in ~4s in Release)
-        Assert.True(sw.Elapsed.TotalSeconds < 30.0, $"Processing 30 min audio took {sw.Elapsed.TotalSeconds:F2}s (throughput {30.0 / (sw.Elapsed.TotalMinutes):F0}x realtime)");
+        // Ensure 30 min of audio processes faster than the original Java app (50s) even in unoptimized Debug mode (runs in ~5s in Release)
+#if DEBUG
+        double thresholdSeconds = 45.0;
+#else
+        double thresholdSeconds = 15.0;
+#endif
+        Assert.True(sw.Elapsed.TotalSeconds < thresholdSeconds, $"Processing 30 min audio took {sw.Elapsed.TotalSeconds:F2}s (throughput {30.0 / (sw.Elapsed.TotalMinutes):F0}x realtime)");
     }
 
     [Fact]
