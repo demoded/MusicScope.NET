@@ -460,4 +460,19 @@ public partial class MainViewModel : ViewModelBase
         GoniometerPointsY = null;
         TrackProgress = 1.0;
     }
+
+    [RelayCommand]
+    private void OpenUrl(string? url)
+    {
+        if (string.IsNullOrEmpty(url)) return;
+        try
+        {
+            System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo
+            {
+                FileName = url,
+                UseShellExecute = true
+            });
+        }
+        catch { }
+    }
 }
