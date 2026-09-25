@@ -97,6 +97,21 @@ public partial class MainViewModel : ViewModelBase
 
     // Peak & RMS levels
     [ObservableProperty]
+    private double _instantPeakLeft = -60.0;
+
+    [ObservableProperty]
+    private double _instantPeakRight = -60.0;
+
+    [ObservableProperty]
+    private double _instantRmsLeft = -60.0;
+
+    [ObservableProperty]
+    private double _instantRmsRight = -60.0;
+
+    [ObservableProperty]
+    private double _instantPlr = 0.0;
+
+    [ObservableProperty]
     private double _samplePeakLeft = -100.0;
 
     [ObservableProperty]
@@ -240,6 +255,11 @@ public partial class MainViewModel : ViewModelBase
         MomentaryMax = -60.0;
         ShortTermCurrent = -60.0;
         ShortTermMax = -60.0;
+        InstantPeakLeft = -60.0;
+        InstantPeakRight = -60.0;
+        InstantRmsLeft = -60.0;
+        InstantRmsRight = -60.0;
+        InstantPlr = 0.0;
         PeakHistory = InitializeHistory(-60.0);
         LoudnessHistory = InitializeHistory(-60.0);
         StereoDensityCloud = null;
@@ -329,10 +349,17 @@ public partial class MainViewModel : ViewModelBase
 
         SamplePeakLeft = s.CurrentPeakLeftDb;
         SamplePeakRight = s.CurrentPeakRightDb;
+        InstantPeakLeft = s.CurrentPeakLeftDb;
+        InstantPeakRight = s.CurrentPeakRightDb;
         TruePeakLeft = s.MaxTruePeakLeftDb;
         TruePeakRight = s.MaxTruePeakRightDb;
         RmsLeft = s.CurrentRmsLeftDb;
         RmsRight = s.CurrentRmsRightDb;
+        InstantRmsLeft = s.CurrentRmsLeftDb;
+        InstantRmsRight = s.CurrentRmsRightDb;
+        InstantPlr = s.RunningPlrDb;
+        MidLevel = s.MidLevelDb;
+        SideLevel = s.SideLevelDb;
 
         if (s.RunningPlrDb > 0.0)
         {
@@ -442,6 +469,13 @@ public partial class MainViewModel : ViewModelBase
         PhaseCorrelation = r.Stereo.Correlation;
         MidLevel = r.Stereo.MidLevelDb;
         SideLevel = r.Stereo.SideLevelDb;
+
+        // Reset live instantaneous meters to -60 dB (idle/finished)
+        InstantPeakLeft = -60.0;
+        InstantPeakRight = -60.0;
+        InstantRmsLeft = -60.0;
+        InstantRmsRight = -60.0;
+        InstantPlr = 0.0;
 
         SpectrumMagnitudes = r.SpectrumMagnitudesDb;
         if (r.PeakHistory != null && r.PeakHistory.Length > 0)

@@ -93,10 +93,20 @@
 
                         <!-- Box 3: S-Mode Loudness & LED Peak Meter -->
                         <Border Grid.Column="2" BorderBrush="#1C2127" BorderThickness="0,0,1,1" Background="#000000">
-                            <ctrl:SModeMeterControl PeakLeftDb="{Binding SamplePeakLeft}"
-                                                    PeakRightDb="{Binding SamplePeakRight}"
+                            <ctrl:SModeMeterControl PeakLeftDb="{Binding InstantPeakLeft}"
+                                                    PeakRightDb="{Binding InstantPeakRight}"
+                                                    MaxPeakLeftDb="{Binding TruePeakLeft}"
+                                                    MaxPeakRightDb="{Binding TruePeakRight}"
+                                                    RmsLeftDb="{Binding InstantRmsLeft}"
+                                                    RmsRightDb="{Binding InstantRmsRight}"
                                                     MomentaryLufs="{Binding MomentaryCurrent}"
+                                                    MomentaryMaxLufs="{Binding MomentaryMax}"
                                                     ShortTermLufs="{Binding ShortTermCurrent}"
+                                                    ShortTermMaxLufs="{Binding ShortTermMax}"
+                                                    IntegratedLufs="{Binding IntegratedLoudness}"
+                                                    PlrDb="{Binding InstantPlr}"
+                                                    MidLevelDb="{Binding MidLevel}"
+                                                    SideLevelDb="{Binding SideLevel}"
                                                     LoudnessRange="{Binding LoudnessRange}"
                                                     LraLow="{Binding LraLow}"
                                                     LraHigh="{Binding LraHigh}"
