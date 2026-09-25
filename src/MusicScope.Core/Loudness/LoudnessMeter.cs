@@ -41,6 +41,9 @@ public sealed class LoudnessMeter
     private double _currentShortTermLufs = -70.0;
     private double _momentaryMax = -70.0;
     private double _shortTermMax = -70.0;
+    // S-Mode Loudness Histogram (751 bins from -70.0 dB to +5.0 dB in 0.1 dB steps, matching MusicScope LoudnessModule)
+    private readonly int[] _sModeHistogram = new int[751];
+    private int _sModeMaxCount;
 
     public double CurrentMomentaryLufs => _currentMomentaryLufs;
     public double CurrentShortTermLufs => _currentShortTermLufs;
@@ -283,6 +286,21 @@ public sealed class LoudnessMeter
             if (_currentShortTermLufs > _shortTermMax)
                 _shortTermMax = _currentShortTermLufs;
         }
+
+        // Accumulate S-Mode histogram after 3s warm-up (matching LoudnessModule.java AlacContextModel > 59)
+        if (_blockPowers400ms.Count >= _blocksPerShortTerm3s &&
+            _currentShortTermLufs >= -70.0 && _currentShortTermLufs <= 5.0)
+        {
+            int bin = (int)Math.Round(10.0 * (_currentShortTermLufs + 70.0));
+            if ((uint)bin < (uint)_sModeHistogram.Length)
+            {
+                int count = ++_sModeHistogram[bin];
+                if (count > _sModeMaxCount)
+                {
+                    _sModeMaxCount = count;
+                }
+            }
+        }
     }
 
     /// <summary>
@@ -371,6 +389,17 @@ public sealed class LoudnessMeter
             }
         }
 
+        // Prefer exact histogram-based percentiles matching MusicScope LoudnessModule if histogram is populated
+        int[] sModeCopy = new int[_sModeHistogram.Length];
+        Array.Copy(_sModeHistogram, sModeCopy, sModeCopy.Length);
+        CalculateLraFromHistogram(sModeCopy, out double hLow, out double hHigh, out double hLra);
+        if (hLra > 0.0)
+        {
+            lra = hLra;
+            lraLow = hLow;
+            lraHigh = hHigh;
+        }
+
         return new LoudnessResult
         {
             IntegratedLoudness = Math.Round(integratedLufs, 1),
@@ -378,8 +407,98 @@ public sealed class LoudnessMeter
             ShortTermMax = Math.Round(_shortTermMax, 1),
             LoudnessRange = Math.Round(lra, 1),
             LraLow = Math.Round(lraLow, 1),
-            LraHigh = Math.Round(lraHigh, 1)
+            LraHigh = Math.Round(lraHigh, 1),
+            SModeHistogram = sModeCopy,
+            SModeMaxCount = _sModeMaxCount
         };
+    }
+
+    /// <summary>
+    /// Returns a real-time copy of the S-Mode histogram and calculates current running LRA percentiles.
+    /// Directly follows the algorithm in MusicScope LoudnessModule.java lines 147-177.
+    /// </summary>
+    public int[] GetHistogramSnapshot(out int maxCount, out double lraLow, out double lraHigh, out double lra)
+    {
+        int[] copy = new int[_sModeHistogram.Length];
+        Array.Copy(_sModeHistogram, copy, copy.Length);
+        maxCount = _sModeMaxCount;
+        CalculateLraFromHistogram(copy, out lraLow, out lraHigh, out lra);
+        return copy;
+    }
+
+    /// <summary>
+    /// Computes LRA and percentiles from the 0.1 dB resolution histogram matching MusicScope LoudnessModule.java.
+    /// </summary>
+    public static void CalculateLraFromHistogram(
+        ReadOnlySpan<int> histogram,
+        out double lraLow,
+        out double lraHigh,
+        out double lra)
+    {
+        lraLow = -70.0;
+        lraHigh = -70.0;
+        lra = 0.0;
+
+        // Step 1: Un-gated power sum
+        double sumPower = 0.0;
+        int totalCount = 0;
+        for (int n = 0; n < histogram.Length; n++)
+        {
+            int count = histogram[n];
+            if (count > 0)
+            {
+                double db = (double)n / 10.0 - 70.0;
+                double power = Math.Pow(10.0, db / 10.0);
+                totalCount += count;
+                sumPower += count * power;
+            }
+        }
+
+        if (totalCount < 2)
+            return;
+
+        double meanPower = sumPower / totalCount;
+        double unGatedLufs = 10.0 * Math.Log10(meanPower);
+        double relativeThreshold = unGatedLufs - 20.0;
+        if (relativeThreshold < -70.0)
+            relativeThreshold = -70.0;
+
+        int startBin = Math.Clamp((int)Math.Round(10.0 * (relativeThreshold + 70.0)), 0, histogram.Length);
+
+        // Step 2: Sum gated counts
+        int gatedCount = 0;
+        for (int n = startBin; n < histogram.Length; n++)
+        {
+            gatedCount += histogram[n];
+        }
+
+        if (gatedCount < 2)
+            return;
+
+        // Step 3: Find 10th and 95th percentiles (matching LoudnessModule.java lines 168-175)
+        int cumCount = 0;
+        int p10Bin = -1;
+        int p95Bin = -1;
+        for (int n = startBin; n < histogram.Length; n++)
+        {
+            cumCount += histogram[n];
+            if (p10Bin == -1 && (double)cumCount / gatedCount > 0.10)
+            {
+                p10Bin = n;
+            }
+            if (p95Bin == -1 && (double)cumCount / gatedCount > 0.95)
+            {
+                p95Bin = n;
+                break;
+            }
+        }
+
+        if (p10Bin >= 0 && p95Bin >= 0)
+        {
+            lraLow = (double)p10Bin / 10.0 - 70.0;
+            lraHigh = (double)p95Bin / 10.0 - 70.0;
+            lra = Math.Max(0.0, lraHigh - lraLow);
+        }
     }
 
     /// <summary>
@@ -399,6 +518,8 @@ public sealed class LoudnessMeter
         _currentShortTermLufs = -70.0;
         _momentaryMax = -70.0;
         _shortTermMax = -70.0;
+        Array.Clear(_sModeHistogram, 0, _sModeHistogram.Length);
+        _sModeMaxCount = 0;
 
         for (int ch = 0; ch < _channelCount; ch++)
         {

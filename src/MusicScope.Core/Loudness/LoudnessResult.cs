@@ -39,4 +39,14 @@ public record LoudnessResult
     /// Whether enough signal above the absolute threshold (-70 LUFS) was detected.
     /// </summary>
     public bool HasAudibleSignal => IntegratedLoudness > -70.0;
+
+    /// <summary>
+    /// S-Mode Loudness Histogram (751 bins from -70.0 dB to +5.0 dB in 0.1 dB steps).
+    /// </summary>
+    public int[]? SModeHistogram { get; init; }
+
+    /// <summary>
+    /// Peak count across any bin in the S-Mode histogram.
+    /// </summary>
+    public int SModeMaxCount { get; init; }
 }

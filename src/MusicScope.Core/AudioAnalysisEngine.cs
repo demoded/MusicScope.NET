@@ -217,12 +217,19 @@ public sealed class AudioAnalysisEngine
         double[] loudnessHistoryCopy = new double[HistoryBinCount];
         Array.Copy(_loudnessHistory, loudnessHistoryCopy, HistoryBinCount);
 
+        int[] sModeHisto = _loudnessMeter.GetHistogramSnapshot(out int sModeMax, out double lraLow, out double lraHigh, out double runningLra);
+
         return new AudioRealtimeSnapshot
         {
             ProgressFraction = progress,
             MomentaryLufs = _loudnessMeter.CurrentMomentaryLufs,
             ShortTermLufs = _loudnessMeter.CurrentShortTermLufs,
             RunningIntegratedLufs = _loudnessMeter.CurrentShortTermLufs, // during live stream, short-term represents the current perceived level
+            RunningLra = runningLra,
+            SModeHistogram = sModeHisto,
+            SModeMaxCount = sModeMax,
+            SModeLraLow = lraLow,
+            SModeLraHigh = lraHigh,
             CurrentPeakLeftDb = _truePeakMeter.CurrentBlockPeakLeftDb,
             CurrentPeakRightDb = _truePeakMeter.CurrentBlockPeakRightDb,
             CurrentRmsLeftDb = _truePeakMeter.CurrentBlockRmsLeftDb,

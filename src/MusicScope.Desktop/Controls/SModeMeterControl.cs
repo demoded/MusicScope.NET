@@ -7,8 +7,8 @@ using Avalonia.Media;
 namespace MusicScope.Desktop.Controls;
 
 /// <summary>
-/// S-Mode Precision Loudness & LED Peak Meter with Distribution Histogram and LRA bracket.
-/// Directly models Box 3 of the MusicScope UI.
+/// S-Mode Precision Loudness &amp; LED Peak Meter with Real-Time Distribution Histogram and LRA bracket.
+/// Directly models Box 3 of the MusicScope UI matching LevelMeterControl.java and LoudnessModule.java.
 /// </summary>
 public sealed class SModeMeterControl : Control
 {
@@ -25,46 +25,48 @@ public sealed class SModeMeterControl : Control
         AvaloniaProperty.Register<SModeMeterControl, double>(nameof(ShortTermLufs), -60.0);
 
     public static readonly StyledProperty<double> LoudnessRangeProperty =
-        AvaloniaProperty.Register<SModeMeterControl, double>(nameof(LoudnessRange), 6.9);
+        AvaloniaProperty.Register<SModeMeterControl, double>(nameof(LoudnessRange), 0.0);
+
+    public static readonly StyledProperty<double> LraLowProperty =
+        AvaloniaProperty.Register<SModeMeterControl, double>(nameof(LraLow), -70.0);
+
+    public static readonly StyledProperty<double> LraHighProperty =
+        AvaloniaProperty.Register<SModeMeterControl, double>(nameof(LraHigh), -70.0);
+
+    public static readonly StyledProperty<int[]?> SModeHistogramProperty =
+        AvaloniaProperty.Register<SModeMeterControl, int[]?>(nameof(SModeHistogram));
+
+    public static readonly StyledProperty<int> SModeMaxCountProperty =
+        AvaloniaProperty.Register<SModeMeterControl, int>(nameof(SModeMaxCount), 0);
 
     public double PeakLeftDb { get => GetValue(PeakLeftDbProperty); set => SetValue(PeakLeftDbProperty, value); }
     public double PeakRightDb { get => GetValue(PeakRightDbProperty); set => SetValue(PeakRightDbProperty, value); }
     public double MomentaryLufs { get => GetValue(MomentaryLufsProperty); set => SetValue(MomentaryLufsProperty, value); }
     public double ShortTermLufs { get => GetValue(ShortTermLufsProperty); set => SetValue(ShortTermLufsProperty, value); }
     public double LoudnessRange { get => GetValue(LoudnessRangeProperty); set => SetValue(LoudnessRangeProperty, value); }
+    public double LraLow { get => GetValue(LraLowProperty); set => SetValue(LraLowProperty, value); }
+    public double LraHigh { get => GetValue(LraHighProperty); set => SetValue(LraHighProperty, value); }
+    public int[]? SModeHistogram { get => GetValue(SModeHistogramProperty); set => SetValue(SModeHistogramProperty, value); }
+    public int SModeMaxCount { get => GetValue(SModeMaxCountProperty); set => SetValue(SModeMaxCountProperty, value); }
 
-    private static readonly IBrush SModeHeaderBrush = new SolidColorBrush(Color.FromRgb(255, 166, 87)); // Orange S-Mode
+    private static readonly IBrush SModeHeaderBrush = new SolidColorBrush(Color.FromRgb(232, 154, 32)); // #E89A20 Orange S-Mode
     private static readonly IBrush RedBrush = new SolidColorBrush(Color.FromRgb(255, 40, 40));
     private static readonly IBrush GreenBrush = new SolidColorBrush(Color.FromRgb(0, 180, 0));
     private static readonly IBrush CyanBrush = new SolidColorBrush(Color.FromRgb(0, 229, 255));
-    private static readonly IBrush AmberHistogramBrush = new SolidColorBrush(Color.FromRgb(232, 154, 32));
+    private static readonly IBrush AmberHistogramBrush = new SolidColorBrush(Color.FromRgb(232, 154, 32)); // #E89A20
+    private static readonly IPen AmberHistogramPen = new Pen(AmberHistogramBrush, 1);
     private static readonly IBrush GridTextBrush = new SolidColorBrush(Color.FromRgb(220, 220, 220));
     private static readonly IBrush DimTextBrush = new SolidColorBrush(Color.FromRgb(90, 95, 100));
     private static readonly IPen RedGridPen = new Pen(new SolidColorBrush(Color.FromRgb(180, 0, 0)), 1);
     private static readonly IPen DimGridPen = new Pen(new SolidColorBrush(Color.FromRgb(55, 60, 65)), 1);
     private static readonly IPen BracketPen = new Pen(new SolidColorBrush(Color.FromRgb(255, 255, 255)), 1.5);
 
-    // Pre-allocated simulated/accumulated loudness distribution bell curve around typical -14 to -24 LUFS
-    private static readonly double[] HistogramWeights = GenerateHistogram();
-
-    private static double[] GenerateHistogram()
-    {
-        double[] h = new double[70]; // -60 to +10 dB
-        for (int i = 0; i < h.Length; i++)
-        {
-            double db = -60 + i;
-            // Bell curve centered around -16 dB
-            double dist = (db - (-16.0)) / 6.0;
-            h[i] = Math.Exp(-0.5 * dist * dist);
-        }
-        return h;
-    }
-
     static SModeMeterControl()
     {
         AffectsRender<SModeMeterControl>(
             PeakLeftDbProperty, PeakRightDbProperty, MomentaryLufsProperty,
-            ShortTermLufsProperty, LoudnessRangeProperty);
+            ShortTermLufsProperty, LoudnessRangeProperty, LraLowProperty, LraHighProperty,
+            SModeHistogramProperty, SModeMaxCountProperty);
     }
 
     public override void Render(DrawingContext context)
@@ -75,26 +77,29 @@ public sealed class SModeMeterControl : Control
 
         var tf = Typeface.Default;
 
-        // Header: S-Mode
-        var ftSMode = new FormattedText("S-Mode", CultureInfo.InvariantCulture, FlowDirection.LeftToRight, tf, 11, SModeHeaderBrush);
-        context.DrawText(ftSMode, new Point(width * 0.45, 8));
-
         double topY = 24.0;
         double bottomY = height - 24.0;
         double meterH = bottomY - topY;
 
+        // Exact exponential-log scale mapping from MusicScope LevelMeterControl.java:
+        // d = 295 - (int)(72.5 * (Math.pow(10.0, (d + 60.0) / 90.0) - 1.0))
         double DbToY(double db)
         {
-            // MusicScope log scale: 3 dB at top, -60 dB at bottom
             double clamped = Math.Clamp(db, -60.0, 3.0);
-            double norm = (3.0 - clamped) / 63.0;
-            return topY + norm * meterH;
+            double f = Math.Pow(10.0, (clamped + 60.0) / 90.0) - 1.0;
+            double norm = f / 4.011872336; // Math.Pow(10.0, 63.0 / 90.0) - 1.0
+            return bottomY - norm * meterH;
         }
 
         // dB Scale grid lines & labels: 3, 0, -3, -6, -12, -20, -30, -40, -50, -60
         double[] dbMarks = [3.0, 0.0, -3.0, -6.0, -12.0, -20.0, -30.0, -40.0, -50.0, -60.0];
-        double gridLeft = 32;
-        double gridRight = width * 0.38;
+        double gridLeft = 28;
+        double gridRight = width * 0.48;
+        double histoLeft = gridRight + 2;
+        double maxHistoW = Math.Max(25.0, width - histoLeft - 18);
+
+        // Header: "S-Mode" in orange aligned to the right side of the S-Mode section
+        DrawTextRight(context, "S-Mode", tf, 11, SModeHeaderBrush, histoLeft + maxHistoW, 8);
 
         for (int i = 0; i < dbMarks.Length; i++)
         {
@@ -141,35 +146,57 @@ public sealed class SModeMeterControl : Control
         DrawText(context, "R", tf, 9, GridTextBrush, barR_X, bottomY + 4);
         DrawText(context, "LU", tf, 9, GridTextBrush, barLU_X, bottomY + 4);
 
-        // Loudness Distribution Histogram (Horizontal amber lines)
-        double histoLeft = width * 0.44;
-        double histoMaxW = width * 0.35;
+        // Vertical Orange Baseline for S-Mode histogram (LevelMeterControl.java line 255)
+        context.DrawLine(AmberHistogramPen, new Point(histoLeft, DbToY(3.0)), new Point(histoLeft, DbToY(-60.0)));
 
-        for (int i = 0; i < HistogramWeights.Length; i++)
+        // Real-Time S-Mode Loudness Distribution Histogram (LevelMeterControl.java lines 229-236)
+        var hist = SModeHistogram;
+        int maxCount = SModeMaxCount;
+
+        if (hist != null && maxCount > 0)
         {
-            double db = -60 + i;
-            double y = DbToY(db);
-            double w = HistogramWeights[i] * histoMaxW;
-            if (w > 1.0)
+            // Iterate from -60.0 dB to +3.0 dB in 0.1 dB steps
+            for (int i = -600; i <= 30; i++)
             {
-                context.DrawLine(new Pen(AmberHistogramBrush, 1.5), new Point(histoLeft, y), new Point(histoLeft + w, y));
+                int bin = i + 700;
+                if ((uint)bin < (uint)hist.Length)
+                {
+                    int count = hist[bin];
+                    if (count > 0)
+                    {
+                        double db = i / 10.0;
+                        double y = DbToY(db);
+                        double w = (double)count / maxCount * maxHistoW;
+                        if (w > 0.5)
+                        {
+                            context.DrawLine(AmberHistogramPen, new Point(histoLeft, y), new Point(histoLeft + w, y));
+                        }
+                    }
+                }
             }
         }
 
-        // LRA Bracket (White vertical bracket with label)
-        double lraCenterDb = -16.0;
-        double lraSpan = Math.Max(2.0, LoudnessRange);
-        double lraTopY = DbToY(lraCenterDb + lraSpan * 0.5);
-        double lraBotY = DbToY(lraCenterDb - lraSpan * 0.5);
-        double bracketX = histoLeft + histoMaxW + 8;
+        // LRA I-Beam Bracket & Value (LevelMeterControl.java lines 238-247)
+        if (LoudnessRange > 0.0 && LraHigh > -70.0 && LraLow > -70.0)
+        {
+            double bracketX = histoLeft + maxHistoW * 0.78;
+            if (bracketX > width - 12)
+                bracketX = width - 12;
 
-        context.DrawLine(BracketPen, new Point(bracketX - 4, lraTopY), new Point(bracketX, lraTopY));
-        context.DrawLine(BracketPen, new Point(bracketX, lraTopY), new Point(bracketX, lraBotY));
-        context.DrawLine(BracketPen, new Point(bracketX - 4, lraBotY), new Point(bracketX, lraBotY));
+            double yLow = DbToY(LraLow);   // 10th percentile
+            double yHigh = DbToY(LraHigh); // 95th percentile
 
-        // LRA Number
-        string lraText = LoudnessRange.ToString("F1", CultureInfo.InvariantCulture);
-        DrawCenteredText(context, lraText, tf, 10, GridTextBrush, bracketX, lraTopY - 14);
+            // Horizontal ticks (width 10px: bracketX - 5 to bracketX + 5)
+            context.DrawLine(BracketPen, new Point(bracketX - 5, yLow), new Point(bracketX + 5, yLow));
+            context.DrawLine(BracketPen, new Point(bracketX - 5, yHigh), new Point(bracketX + 5, yHigh));
+
+            // Vertical stem connecting ticks
+            context.DrawLine(BracketPen, new Point(bracketX, yLow), new Point(bracketX, yHigh));
+
+            // LRA Value text centered above the top tick (e.g. "6.9")
+            string lraText = LoudnessRange.ToString("F1", CultureInfo.InvariantCulture);
+            DrawCenteredText(context, lraText, tf, 11, GridTextBrush, bracketX, yHigh - 15);
+        }
     }
 
     private static void DrawText(DrawingContext ctx, string text, Typeface tf, double size, IBrush brush, double x, double y)

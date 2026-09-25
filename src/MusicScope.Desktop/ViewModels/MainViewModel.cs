@@ -83,6 +83,18 @@ public partial class MainViewModel : ViewModelBase
     [ObservableProperty]
     private double _loudnessRange = 0.0;
 
+    [ObservableProperty]
+    private int[]? _sModeHistogram;
+
+    [ObservableProperty]
+    private int _sModeMaxCount;
+
+    [ObservableProperty]
+    private double _lraLow = -70.0;
+
+    [ObservableProperty]
+    private double _lraHigh = -70.0;
+
     // Peak & RMS levels
     [ObservableProperty]
     private double _samplePeakLeft = -100.0;
@@ -219,6 +231,10 @@ public partial class MainViewModel : ViewModelBase
         PeakHistory = InitializeHistory(-60.0);
         LoudnessHistory = InitializeHistory(-60.0);
         StereoDensityCloud = null;
+        SModeHistogram = null;
+        SModeMaxCount = 0;
+        LraLow = -70.0;
+        LraHigh = -70.0;
         FilePath = path;
         TrackTitle = Path.GetFileNameWithoutExtension(path);
 
@@ -285,6 +301,14 @@ public partial class MainViewModel : ViewModelBase
         if (s.RunningLra > 0.0)
         {
             LoudnessRange = s.RunningLra;
+        }
+
+        if (s.SModeHistogram != null)
+        {
+            SModeHistogram = s.SModeHistogram;
+            SModeMaxCount = s.SModeMaxCount;
+            LraLow = s.SModeLraLow;
+            LraHigh = s.SModeLraHigh;
         }
 
         SamplePeakLeft = s.CurrentPeakLeftDb;
@@ -365,6 +389,10 @@ public partial class MainViewModel : ViewModelBase
         ShortTermCurrent = -60.0;
         ShortTermMax = r.Loudness.ShortTermMax;
         LoudnessRange = r.Loudness.LoudnessRange;
+        LraLow = r.Loudness.LraLow;
+        LraHigh = r.Loudness.LraHigh;
+        SModeHistogram = r.Loudness.SModeHistogram;
+        SModeMaxCount = r.Loudness.SModeMaxCount;
 
         SamplePeakLeft = r.Levels.SamplePeakLeftDb;
         SamplePeakRight = r.Levels.SamplePeakRightDb;

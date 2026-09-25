@@ -179,6 +179,43 @@ public class DspAndMeteringTests
     }
 
     [Fact]
+    public void LoudnessMeter_Accumulates_SModeHistogram_And_Calculates_LRA()
+    {
+        double sampleRate = 48000.0;
+        var meter = new LoudnessMeter(sampleRate, channelCount: 2);
+
+        // Feed 8 seconds of audio with dynamic variations (4s loud, 4s quiet)
+        // to surpass the 3.0s warm-up window and populate multiple histogram bins
+        int totalFrames = (int)(8.0 * sampleRate);
+        double[] stereo = new double[totalFrames * 2];
+        for (int i = 0; i < totalFrames; i++)
+        {
+            double amp = i < totalFrames / 2 ? 0.707 : 0.15;
+            double val = amp * Math.Sin(2.0 * Math.PI * 1000.0 * i / sampleRate);
+            stereo[i * 2] = val;
+            stereo[i * 2 + 1] = val;
+        }
+
+        meter.ProcessInterleaved(stereo);
+
+        // Test real-time snapshot
+        int[] snapshotHisto = meter.GetHistogramSnapshot(out int maxCount, out double liveLow, out double liveHigh, out double liveLra);
+        Assert.NotNull(snapshotHisto);
+        Assert.Equal(751, snapshotHisto.Length);
+        Assert.True(maxCount > 0, "Expected non-zero maxCount in S-Mode snapshot");
+        Assert.True(liveLra > 0.0, $"Expected positive running LRA, got {liveLra}");
+        Assert.True(liveHigh >= liveLow);
+
+        // Test final result
+        var result = meter.CalculateResult();
+        Assert.NotNull(result.SModeHistogram);
+        Assert.Equal(751, result.SModeHistogram.Length);
+        Assert.True(result.SModeMaxCount > 0);
+        Assert.True(result.LoudnessRange > 0.0, $"Expected positive LRA, got {result.LoudnessRange}");
+        Assert.True(result.LraHigh >= result.LraLow);
+    }
+
+    [Fact]
     public void ThdAnalyzer_Calculates_Low_Distortion_For_Pure_Sine()
     {
         double sampleRate = 48000.0;

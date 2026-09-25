@@ -42,6 +42,12 @@ public record AudioRealtimeSnapshot
     public double[]? PeakHistory { get; init; }
     public double[]? LoudnessHistory { get; init; }
 
+    // S-Mode Loudness Histogram (751 bins from -70.0 dB to +5.0 dB in 0.1 dB steps)
+    public int[]? SModeHistogram { get; init; }
+    public int SModeMaxCount { get; init; }
+    public double SModeLraLow { get; init; } = -70.0;
+    public double SModeLraHigh { get; init; } = -70.0;
+
     // Goniometer vector points for phosphor scope
     public float[]? GoniometerPointsX { get; init; }
     public float[]? GoniometerPointsY { get; init; }

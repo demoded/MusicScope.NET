@@ -95,9 +95,13 @@
                         <Border Grid.Column="2" BorderBrush="#1C2127" BorderThickness="0,0,1,1" Background="#000000">
                             <ctrl:SModeMeterControl PeakLeftDb="{Binding SamplePeakLeft}"
                                                     PeakRightDb="{Binding SamplePeakRight}"
-                                                    MomentaryLufs="{Binding MomentaryMax}"
-                                                    ShortTermLufs="{Binding ShortTermMax}"
-                                                    LoudnessRange="{Binding LoudnessRange}"/>
+                                                    MomentaryLufs="{Binding MomentaryCurrent}"
+                                                    ShortTermLufs="{Binding ShortTermCurrent}"
+                                                    LoudnessRange="{Binding LoudnessRange}"
+                                                    LraLow="{Binding LraLow}"
+                                                    LraHigh="{Binding LraHigh}"
+                                                    SModeHistogram="{Binding SModeHistogram}"
+                                                    SModeMaxCount="{Binding SModeMaxCount}"/>
                         </Border>
 
                         <!-- Box 4: Circular Polar History Radar Dial -->
