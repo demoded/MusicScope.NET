@@ -14,6 +14,8 @@ This test suite contains 6 reference WAV audio files created with mathematically
 | **04** | `04_MusicalSim_Crest_11.1dB_44k_16bit.wav`| 44.1 kHz / 16-bit | 0.0 dBFS | -11.1 dBFS | **11.1 dB** | 0.0 dBFS | +0.4 dBFS | -11.1 dBFS | **11.2 dB\*** | _(verify)_ |
 | **05** | `05_HighDynamics_Crest_14dB_44k_16bit.wav`| 44.1 kHz / 16-bit | 0.0 dBFS | -14.0 dBFS | **14.0 dB** | 0.0 dBFS | 0.0 dBFS | -14.0 dBFS | **14.0 dB** | _(verify)_ |
 | **06** | `06_MusicalSim_Crest_11.1dB_96k_24bit.wav`| 96.0 kHz / 24-bit | 0.0 dBFS | -11.1 dBFS | **11.1 dB** | 0.0 dBFS | 0.0 dBFS | -11.1 dBFS | **11.1 dB** | _(verify)_ |
+| **07** | `07_Sweep_10kHz_22.5kHz_-60dBFS_48k_24bit.wav`| 48.0 kHz / 24-bit | -60.0 dBFS | -63.0 dBFS | **3.0 dB** | -60.0 dBFS | -60.0 dBFS | -63.8 dBFS | **3.1 dB** | _(verify)_ |
+| **07b** | `07_Sweep_10kHz_22.5kHz_-60dBFS_48k_16bit.wav`| 48.0 kHz / 16-bit | -60.0 dBFS | -63.0 dBFS | **3.0 dB** | -60.2 dBFS | -59.9 dBFS | -63.9 dBFS | **3.3 dB** | _(verify)_ |
 
 \* _Note on Inter-Sample Overshoot:_ In MusicScope's algorithm, CREST is computed from the **oversampled True Peak** rather than the discrete sample peak. Files with sharp transients that induce polyphase filter overshoot (e.g. +1.0 dB on pulsed tones or +0.4 dB on 44.1 kHz percussion) yield a correspondingly higher CREST factor ($1.0 - (-10.0) = 11.0\text{ dB}$).
 
@@ -67,6 +69,15 @@ This test suite contains 6 reference WAV audio files created with mathematically
 - **Duration**: 10.0 seconds
 - **Sample Rate / Bits**: 96,000 Hz / 24-bit stereo PCM
 - **Description**: High-resolution 24-bit rendering of the realistic musical simulation to verify the 96 kHz (2x polyphase filter) path and 24-bit word precision.
+
+### File 07: `07_Sweep_10kHz_22.5kHz_-60dBFS_48k_24bit.wav` (High-Frequency Low-Level Sweep)
+- **Duration**: 10.0 seconds
+- **Sample Rate / Bits**: 48,000 Hz / 24-bit stereo PCM (also available in 16-bit: `07_Sweep_10kHz_22.5kHz_-60dBFS_48k_16bit.wav`)
+- **Description**: Linear frequency chirp / sweep from 10,000 Hz (10 kHz) to 22,500 Hz (22.5 kHz) calibrated to exact -60.0 dBFS amplitude:
+  - Instantaneous frequency: $f(t) = 10000 + 1250 \cdot t\text{ Hz}$ ($0 \le t \le 10\text{ s}$).
+  - Amplitude: $A = 10^{-60/20} = 0.001$ (-60 dBFS peak).
+  - Smooth 10 ms cosine ramp on onset and termination to avoid transient clicks.
+  - Useful for inspecting the Cut-Off Frequency detector, the -200dB Mode vs standard mode spectrum line, and Sonogram/Waterfall diagonal trail near the 48 kHz Nyquist limit (24 kHz).
 
 ---
 

@@ -294,7 +294,32 @@ def generate_all():
         s_r.extend(block)
     write_wav_24bit("06_MusicalSim_Crest_11.1dB_96k_24bit.wav", sr_96k, 2, s_l, s_r)
 
-    print("\nAll 6 test reference WAV files successfully generated!")
+    # -------------------------------------------------------------
+    # 7. 07_Sweep_10kHz_22.5kHz_-60dBFS_48k_24bit.wav
+    # Frequency sweep: 10 kHz to 22.5 kHz at -60 dBFS
+    # -------------------------------------------------------------
+    sr_48k = 48000
+    n_48k = int(duration * sr_48k)
+    f0 = 10000.0
+    f1 = 22500.0
+    amp_60db = 10.0 ** (-60.0 / 20.0)  # 0.001 (-60 dBFS peak)
+    fade_len = int(0.010 * sr_48k)     # 10ms smooth ramp
+
+    s_sweep = []
+    for n in range(n_48k):
+        t = n / sr_48k
+        phase = 2.0 * math.pi * (f0 * t + (f1 - f0) / (2.0 * duration) * t * t)
+        val = amp_60db * math.sin(phase)
+        if n < fade_len:
+            val *= 0.5 * (1.0 - math.cos(math.pi * n / fade_len))
+        elif n > n_48k - fade_len:
+            val *= 0.5 * (1.0 - math.cos(math.pi * (n_48k - n) / fade_len))
+        s_sweep.append(val)
+
+    write_wav_24bit("07_Sweep_10kHz_22.5kHz_-60dBFS_48k_24bit.wav", sr_48k, 2, s_sweep, s_sweep)
+    write_wav_16bit("07_Sweep_10kHz_22.5kHz_-60dBFS_48k_16bit.wav", sr_48k, 2, s_sweep, s_sweep)
+
+    print("\nAll test reference WAV files successfully generated!")
 
 
 if __name__ == "__main__":
