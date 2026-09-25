@@ -334,12 +334,23 @@ public partial class MainViewModel : ViewModelBase
         RmsLeft = s.CurrentRmsLeftDb;
         RmsRight = s.CurrentRmsRightDb;
 
-        double currentMaxPeak = Math.Max(s.CurrentPeakLeftDb, s.CurrentPeakRightDb);
-        if (currentMaxPeak > -60.0 && s.RunningIntegratedLufs > -60.0)
+        if (s.RunningPlrDb > 0.0)
         {
-            Plr = Math.Max(0.0, currentMaxPeak - s.RunningIntegratedLufs);
+            Plr = s.RunningPlrDb;
         }
-        if (s.RunningCrestDb > 0.0)
+        else
+        {
+            double currentMaxPeak = Math.Max(s.CurrentPeakLeftDb, s.CurrentPeakRightDb);
+            if (currentMaxPeak > -60.0 && s.RunningIntegratedLufs > -60.0)
+            {
+                Plr = Math.Max(0.0, currentMaxPeak - s.RunningIntegratedLufs);
+            }
+        }
+        if (s.RunningInstantCrestDb > 0.0)
+        {
+            CrestFactor = s.RunningInstantCrestDb;
+        }
+        else if (s.RunningCrestDb > 0.0)
         {
             CrestFactor = s.RunningCrestDb;
         }
@@ -426,7 +437,7 @@ public partial class MainViewModel : ViewModelBase
         RmsRight = r.Levels.RmsRightDb;
         CrestFactor = r.Levels.CrestFactorDb;
         DynamicRange = r.Levels.DynamicRangeDb;
-        Plr = Math.Max(0.0, Math.Max(r.Levels.TruePeakLeftDb, r.Levels.TruePeakRightDb) - r.Loudness.IntegratedLoudness);
+        Plr = r.Loudness.PlrAvgDb > 0.0 ? r.Loudness.PlrAvgDb : Math.Max(0.0, Math.Max(r.Levels.TruePeakLeftDb, r.Levels.TruePeakRightDb) - r.Loudness.IntegratedLoudness);
 
         PhaseCorrelation = r.Stereo.Correlation;
         MidLevel = r.Stereo.MidLevelDb;

@@ -45,10 +45,27 @@ public sealed class LoudnessMeter
     private readonly int[] _sModeHistogram = new int[751];
     private int _sModeMaxCount;
 
+    // PLR (Peak-to-Loudness Ratio) matching XiVideo MusicScope LoudnessModule
+    private const int PlrBlockSize = 2048;
+    private int _plrBlockSampleCount;
+    private double _plrBlockMaxPeak;
+    private double _plrBlockEnergySum;
+    private readonly double[] _plrPeakRing = new double[8];
+    private readonly double[] _plrEnergyRing = new double[8];
+    private int _plrPeakRingIdx;
+    private int _plrEnergyRingIdx;
+    private int _plrWarmup;
+    private double _plrChunkInfo;
+    private double _plrDemuxResT = 1.0;
+    private double _currentInstantPlrDb;
+    private double _plrAvgDb;
+
     public double CurrentMomentaryLufs => _currentMomentaryLufs;
     public double CurrentShortTermLufs => _currentShortTermLufs;
     public double MomentaryMax => _momentaryMax;
     public double ShortTermMax => _shortTermMax;
+    public double CurrentInstantPlrDb => _currentInstantPlrDb;
+    public double PlrAvgDb => _plrAvgDb;
 
     public LoudnessMeter(double sampleRate, int channelCount = 2, double[]? channelWeights = null)
     {
@@ -107,6 +124,18 @@ public sealed class LoudnessMeter
                 stepSamples++;
                 totalSamples++;
 
+                // PLR accumulation
+                double absL = Math.Abs(filteredL);
+                double absR = Math.Abs(filteredR);
+                if (absL > _plrBlockMaxPeak) _plrBlockMaxPeak = absL;
+                if (absR > _plrBlockMaxPeak) _plrBlockMaxPeak = absR;
+                _plrBlockEnergySum += (filteredL * filteredL + filteredR * filteredR);
+                _plrBlockSampleCount++;
+                if (_plrBlockSampleCount >= PlrBlockSize)
+                {
+                    EvaluatePlrBlock();
+                }
+
                 if (stepSamples >= stepTarget)
                 {
                     _current100msEnergy[0] = energy0;
@@ -133,11 +162,22 @@ public sealed class LoudnessMeter
             for (int frame = 0; frame < frameCount; frame++)
             {
                 int baseIdx = frame * _channelCount;
+                double frameEnergySum = 0.0;
                 for (int ch = 0; ch < _channelCount; ch++)
                 {
                     double raw = samples[baseIdx + ch];
                     double filtered = _filter.ProcessSample(ch, raw);
                     _current100msEnergy[ch] += filtered * filtered;
+
+                    double abs = Math.Abs(filtered);
+                    if (abs > _plrBlockMaxPeak) _plrBlockMaxPeak = abs;
+                    frameEnergySum += filtered * filtered;
+                }
+                _plrBlockEnergySum += frameEnergySum;
+                _plrBlockSampleCount++;
+                if (_plrBlockSampleCount >= PlrBlockSize)
+                {
+                    EvaluatePlrBlock();
                 }
 
                 _samplesSinceLastStep++;
@@ -178,6 +218,18 @@ public sealed class LoudnessMeter
                 stepSamples++;
                 totalSamples++;
 
+                // PLR accumulation
+                double absL = Math.Abs(filteredL);
+                double absR = Math.Abs(filteredR);
+                if (absL > _plrBlockMaxPeak) _plrBlockMaxPeak = absL;
+                if (absR > _plrBlockMaxPeak) _plrBlockMaxPeak = absR;
+                _plrBlockEnergySum += (filteredL * filteredL + filteredR * filteredR);
+                _plrBlockSampleCount++;
+                if (_plrBlockSampleCount >= PlrBlockSize)
+                {
+                    EvaluatePlrBlock();
+                }
+
                 if (stepSamples >= stepTarget)
                 {
                     _current100msEnergy[0] = energy0;
@@ -204,11 +256,22 @@ public sealed class LoudnessMeter
             for (int frame = 0; frame < frameCount; frame++)
             {
                 int baseIdx = frame * _channelCount;
+                double frameEnergySum = 0.0;
                 for (int ch = 0; ch < _channelCount; ch++)
                 {
                     double raw = samples[baseIdx + ch];
                     double filtered = _filter.ProcessSample(ch, raw);
                     _current100msEnergy[ch] += filtered * filtered;
+
+                    double abs = Math.Abs(filtered);
+                    if (abs > _plrBlockMaxPeak) _plrBlockMaxPeak = abs;
+                    frameEnergySum += filtered * filtered;
+                }
+                _plrBlockEnergySum += frameEnergySum;
+                _plrBlockSampleCount++;
+                if (_plrBlockSampleCount >= PlrBlockSize)
+                {
+                    EvaluatePlrBlock();
                 }
 
                 _samplesSinceLastStep++;
@@ -300,6 +363,55 @@ public sealed class LoudnessMeter
                     _sModeMaxCount = count;
                 }
             }
+        }
+    }
+
+    private void EvaluatePlrBlock()
+    {
+        double d2 = _plrBlockMaxPeak;
+        double d9 = _plrBlockEnergySum / PlrBlockSize;
+        _plrBlockSampleCount = 0;
+        _plrBlockMaxPeak = 0.0;
+        _plrBlockEnergySum = 0.0;
+
+        _plrPeakRing[_plrPeakRingIdx] = d2;
+        _plrPeakRingIdx = (_plrPeakRingIdx + 1) & 7;
+
+        double sumPeak = 0.0;
+        for (int i = 0; i < 8; i++)
+        {
+            sumPeak += _plrPeakRing[i];
+        }
+        double avgPeak = sumPeak / 8.0;
+        double d10 = avgPeak > 0.0 ? 20.0 * Math.Log10(avgPeak) - 0.691 : -60.0;
+        if (d10 < -60.0) d10 = -60.0;
+
+        _plrEnergyRing[_plrEnergyRingIdx] = d9;
+        _plrEnergyRingIdx = (_plrEnergyRingIdx + 1) & 7;
+
+        double sumEnergy = 0.0;
+        for (int i = 0; i < 8; i++)
+        {
+            sumEnergy += _plrEnergyRing[i];
+        }
+        double avgEnergy = sumEnergy / 8.0;
+        double d12 = avgEnergy > 0.0 ? 10.0 * Math.Log10(avgEnergy) - 0.691 : -90.0;
+        if (d12 < -60.0) d12 = -60.0;
+
+        double instantPlr = d10 - d12;
+        if (instantPlr < 0.0) instantPlr = 0.0;
+
+        if (_plrWarmup < 8)
+        {
+            _plrWarmup++;
+            _currentInstantPlrDb = 0.0;
+        }
+        else
+        {
+            _currentInstantPlrDb = instantPlr;
+            _plrChunkInfo += Math.Pow(10.0, instantPlr / 20.0);
+            _plrDemuxResT += 1.0;
+            _plrAvgDb = _plrChunkInfo > 0.0 ? 20.0 * Math.Log10(_plrChunkInfo / _plrDemuxResT) : 0.0;
         }
     }
 
@@ -406,6 +518,7 @@ public sealed class LoudnessMeter
             MomentaryMax = Math.Round(_momentaryMax, 1),
             ShortTermMax = Math.Round(_shortTermMax, 1),
             LoudnessRange = Math.Round(lra, 1),
+            PlrAvgDb = Math.Round(_plrAvgDb, 1),
             LraLow = Math.Round(lraLow, 1),
             LraHigh = Math.Round(lraHigh, 1),
             SModeHistogram = sModeCopy,
@@ -520,6 +633,19 @@ public sealed class LoudnessMeter
         _shortTermMax = -70.0;
         Array.Clear(_sModeHistogram, 0, _sModeHistogram.Length);
         _sModeMaxCount = 0;
+
+        _plrBlockSampleCount = 0;
+        _plrBlockMaxPeak = 0.0;
+        _plrBlockEnergySum = 0.0;
+        Array.Clear(_plrPeakRing, 0, _plrPeakRing.Length);
+        Array.Clear(_plrEnergyRing, 0, _plrEnergyRing.Length);
+        _plrPeakRingIdx = 0;
+        _plrEnergyRingIdx = 0;
+        _plrWarmup = 0;
+        _plrChunkInfo = 0.0;
+        _plrDemuxResT = 1.0;
+        _currentInstantPlrDb = 0.0;
+        _plrAvgDb = 0.0;
 
         for (int ch = 0; ch < _channelCount; ch++)
         {

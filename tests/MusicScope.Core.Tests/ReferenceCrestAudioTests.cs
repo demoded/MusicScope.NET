@@ -38,7 +38,7 @@ public class ReferenceCrestAudioTests
         Assert.NotEmpty(files);
 
         _output.WriteLine("=================================================================================================");
-        _output.WriteLine(string.Format("{0,-40} | {1,8} | {2,8} | {3,8} | {4,8} | {5,6}", "Filename", "SamplePeak", "TruePeak", "RMS", "CREST", "DR"));
+        _output.WriteLine(string.Format("{0,-40} | {1,8} | {2,8} | {3,8} | {4,8} | {5,8} | {6,6}", "Filename", "SamplePeak", "TruePeak", "RMS", "CREST", "PLR_Avg", "DR"));
         _output.WriteLine("=================================================================================================");
 
         foreach (var file in files)
@@ -53,15 +53,14 @@ public class ReferenceCrestAudioTests
             });
 
             var report = engine.GenerateReport(Path.GetFileNameWithoutExtension(file), file, probe.FormatName, probe.Duration, probe.BitDepth);
-
-            _output.WriteLine(string.Format("{0,-40} | {1,8:F1} | {2,8:F1} | {3,8:F1} | {4,8:F1} | {5,6:F1}",
+            _output.WriteLine(string.Format("{0,-40} | {1,8:F1} | {2,8:F1} | {3,8:F1} | {4,8:F1} | {5,8:F1} | {6,6:F1}",
                 Path.GetFileName(file),
                 report.Levels.SamplePeakLeftDb,
                 report.Levels.TruePeakLeftDb,
                 report.Levels.RmsLeftDb,
                 report.Levels.CrestFactorDb,
+                report.Loudness.PlrAvgDb,
                 report.Levels.DynamicRangeDb));
-
         }
         _output.WriteLine("=================================================================================================");
     }

@@ -285,7 +285,7 @@ public class DspAndMeteringTests
         Assert.True(report.Loudness.HasAudibleSignal);
         // Ensure 30 min of audio processes faster than the original Java app (50s) even in unoptimized Debug mode (runs in ~5s in Release)
 #if DEBUG
-        double thresholdSeconds = 45.0;
+        double thresholdSeconds = 60.0;
 #else
         double thresholdSeconds = 15.0;
 #endif

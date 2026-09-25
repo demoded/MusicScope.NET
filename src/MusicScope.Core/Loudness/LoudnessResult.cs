@@ -26,6 +26,11 @@ public record LoudnessResult
     public double LoudnessRange { get; init; } = 0.0;
 
     /// <summary>
+    /// Average Peak-to-Loudness Ratio (PLR Avg.) in dB, matching XiVideo MusicScope LoudnessModule.
+    /// </summary>
+    public double PlrAvgDb { get; init; } = 0.0;
+
+    /// <summary>
     /// Lower boundary of the Loudness Range (10th percentile) in LUFS.
     /// </summary>
     public double LraLow { get; init; } = -70.0;

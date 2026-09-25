@@ -26,8 +26,12 @@ public record AudioRealtimeSnapshot
     public double MaxTruePeakLeftDb { get; init; } = -100.0;
     public double MaxTruePeakRightDb { get; init; } = -100.0;
 
-    // Running CREST Factor Avg
+    // Running CREST Factor Avg & Instantaneous
     public double RunningCrestDb { get; init; } = 0.0;
+    public double RunningInstantCrestDb { get; init; } = 0.0;
+
+    // Running PLR (Peak-to-Loudness Ratio) Avg
+    public double RunningPlrDb { get; init; } = 0.0;
 
     // Stereo
     public double Correlation { get; init; } = 1.0;
