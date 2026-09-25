@@ -26,6 +26,9 @@ public record AudioRealtimeSnapshot
     public double MaxTruePeakLeftDb { get; init; } = -100.0;
     public double MaxTruePeakRightDb { get; init; } = -100.0;
 
+    // Running CREST Factor Avg
+    public double RunningCrestDb { get; init; } = 0.0;
+
     // Stereo
     public double Correlation { get; init; } = 1.0;
     public double MidLevelDb { get; init; } = -100.0;

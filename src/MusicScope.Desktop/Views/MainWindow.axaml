@@ -83,10 +83,10 @@
                                                    RmsRight="{Binding RmsRight}"
                                                    CrestFactor="{Binding CrestFactor}"
                                                    Plr="{Binding Plr}"
-                                                   MomentaryLeft="{Binding MomentaryMax}"
-                                                   MomentaryRight="{Binding MomentaryMax}"
-                                                   ShortTermLeft="{Binding ShortTermMax}"
-                                                   ShortTermRight="{Binding ShortTermMax}"
+                                                   MomentaryCurrent="{Binding MomentaryCurrent}"
+                                                   MomentaryMax="{Binding MomentaryMax}"
+                                                   ShortTermCurrent="{Binding ShortTermCurrent}"
+                                                   ShortTermMax="{Binding ShortTermMax}"
                                                    IntegratedLoudness="{Binding IntegratedLoudness}"
                                                    LoudnessRange="{Binding LoudnessRange}"/>
                         </Border>

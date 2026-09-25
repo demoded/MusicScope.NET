@@ -154,6 +154,7 @@ public sealed class AudioAnalysisEngine
             CurrentRmsRightDb = _truePeakMeter.CurrentBlockRmsRightDb,
             MaxTruePeakLeftDb = _truePeakMeter.MaxTruePeakLeftDb,
             MaxTruePeakRightDb = _truePeakMeter.MaxTruePeakRightDb,
+            RunningCrestDb = _truePeakMeter.CrestAvgDb,
             Correlation = _stereoAnalyzer.RealtimeCorrelation,
             InstantSpectrumDb = spectrumCopy,
             CumulativePeakSpectrumDb = peakHoldCopy,

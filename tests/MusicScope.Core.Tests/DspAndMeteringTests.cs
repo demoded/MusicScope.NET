@@ -200,4 +200,26 @@ public class DspAndMeteringTests
         // Ensure 30 min of audio processes in under 30 seconds even in unoptimized Debug mode (runs in ~4s in Release)
         Assert.True(sw.Elapsed.TotalSeconds < 30.0, $"Processing 30 min audio took {sw.Elapsed.TotalSeconds:F2}s (throughput {30.0 / (sw.Elapsed.TotalMinutes):F0}x realtime)");
     }
+
+    [Fact]
+    public void TruePeakMeter_Calculates_Running_Crest_Factor_Matching_MusicScope()
+    {
+        var meter = new TruePeakMeter(channelCount: 2);
+        // Feed 16 blocks (16 * 2048 = 32768 frames) of a pure 1 kHz stereo sine wave at 0 dBFS
+        int frameCount = 32768;
+        double[] stereo = new double[frameCount * 2];
+        for (int i = 0; i < frameCount; i++)
+        {
+            double val = Math.Sin(2.0 * Math.PI * 1000.0 * i / 44100.0);
+            stereo[i * 2] = val;
+            stereo[i * 2 + 1] = val;
+        }
+
+        meter.ProcessInterleaved(stereo);
+        var result = meter.CalculateResult();
+
+        // For a sine wave, theoretical Crest factor is sqrt(2) = 3.01 dB (~3.0 dB)
+        Assert.InRange(result.CrestFactorDb, 2.9, 3.1);
+        Assert.InRange(meter.CrestAvgDb, 2.9, 3.1);
+    }
 }

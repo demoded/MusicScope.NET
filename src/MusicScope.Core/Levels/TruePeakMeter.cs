@@ -79,6 +79,18 @@ public sealed class TruePeakMeter
     private readonly double[] _currentBlockRms;
     private long _totalFrames;
 
+    private const int CrestBlockSize = 2048;
+    private int _crestSampleInBlock;
+    private readonly double[] _crestBlockPeak = new double[2];
+    private readonly double[] _crestBlockSumSq = new double[2];
+    private readonly double[] _crestRingBuffer = new double[8];
+    private int _crestRingIndex;
+    private int _crestWarmupCount;
+    private double _crestSum;
+    private long _crestCount = 1;
+    private double _crestAvgDb;
+    private double _currentInstantCrestDb;
+
     public double CurrentBlockPeakLeftDb => _currentBlockPeak[0] > 1e-6 ? 20.0 * Math.Log10(_currentBlockPeak[0]) : -100.0;
     public double CurrentBlockPeakRightDb => _channelCount > 1 && _currentBlockPeak[1] > 1e-6 ? 20.0 * Math.Log10(_currentBlockPeak[1]) : CurrentBlockPeakLeftDb;
     public double CurrentBlockRmsLeftDb => _currentBlockRms[0] > 1e-6 ? 20.0 * Math.Log10(_currentBlockRms[0]) : -100.0;
@@ -86,6 +98,9 @@ public sealed class TruePeakMeter
 
     public double MaxTruePeakLeftDb => _truePeakMax[0] > 1e-6 ? 20.0 * Math.Log10(_truePeakMax[0]) : -100.0;
     public double MaxTruePeakRightDb => _channelCount > 1 && _truePeakMax[1] > 1e-6 ? 20.0 * Math.Log10(_truePeakMax[1]) : MaxTruePeakLeftDb;
+
+    public double CrestAvgDb => _crestAvgDb;
+    public double CurrentInstantCrestDb => _currentInstantCrestDb;
 
     public TruePeakMeter(int channelCount = 2)
     {
@@ -157,6 +172,9 @@ public sealed class TruePeakMeter
                 if (absS > _samplePeakMax[ch])
                     _samplePeakMax[ch] = absS;
 
+                if (absS > _truePeakMax[ch])
+                    _truePeakMax[ch] = absS;
+
                 _sumSquares[ch] += s * s;
 
                 // Contiguous double-buffer write
@@ -182,6 +200,29 @@ public sealed class TruePeakMeter
                     }
                 }
             }
+
+            // CREST factor block tracking matching XiVideo MusicScope LevelsModule
+            double s0 = samples[baseIdx];
+            double absS0 = Math.Abs(s0);
+            if (absS0 > _crestBlockPeak[0])
+                _crestBlockPeak[0] = absS0;
+            _crestBlockSumSq[0] += s0 * s0;
+
+            if (_channelCount > 1)
+            {
+                double s1 = samples[baseIdx + 1];
+                double absS1 = Math.Abs(s1);
+                if (absS1 > _crestBlockPeak[1])
+                    _crestBlockPeak[1] = absS1;
+                _crestBlockSumSq[1] += s1 * s1;
+            }
+
+            _crestSampleInBlock++;
+            if (_crestSampleInBlock >= CrestBlockSize)
+            {
+                UpdateCrestBlock();
+            }
+
             _totalFrames++;
         }
 
@@ -219,6 +260,9 @@ public sealed class TruePeakMeter
                 if (absS > _samplePeakMax[ch])
                     _samplePeakMax[ch] = absS;
 
+                if (absS > _truePeakMax[ch])
+                    _truePeakMax[ch] = absS;
+
                 _sumSquares[ch] += s * s;
 
                 // Contiguous double-buffer write
@@ -244,6 +288,29 @@ public sealed class TruePeakMeter
                     }
                 }
             }
+
+            // CREST factor block tracking matching XiVideo MusicScope LevelsModule
+            double s0 = samples[baseIdx];
+            double absS0 = Math.Abs(s0);
+            if (absS0 > _crestBlockPeak[0])
+                _crestBlockPeak[0] = absS0;
+            _crestBlockSumSq[0] += s0 * s0;
+
+            if (_channelCount > 1)
+            {
+                double s1 = samples[baseIdx + 1];
+                double absS1 = Math.Abs(s1);
+                if (absS1 > _crestBlockPeak[1])
+                    _crestBlockPeak[1] = absS1;
+                _crestBlockSumSq[1] += s1 * s1;
+            }
+
+            _crestSampleInBlock++;
+            if (_crestSampleInBlock >= CrestBlockSize)
+            {
+                UpdateCrestBlock();
+            }
+
             _totalFrames++;
         }
 
@@ -254,11 +321,73 @@ public sealed class TruePeakMeter
         }
     }
 
+    private void UpdateCrestBlock()
+    {
+        int count = _crestSampleInBlock;
+        if (count == 0) return;
+
+        double pL = _crestBlockPeak[0];
+        double pR = _channelCount > 1 ? _crestBlockPeak[1] : 0.0;
+        double sqL = _crestBlockSumSq[0] / count;
+        double sqR = _channelCount > 1 ? _crestBlockSumSq[1] / count : sqL;
+
+        double blockPeak = pL;
+        double blockEnergy = sqL;
+        if (blockPeak < pR)
+        {
+            blockPeak = pR;
+            blockEnergy = sqR;
+        }
+
+        double blockRms = Math.Sqrt(blockEnergy);
+        double crestLinear = blockRms > 0.0 ? (blockPeak / blockRms) : 0.0;
+
+        _crestRingBuffer[_crestRingIndex] = crestLinear;
+        _crestRingIndex = (_crestRingIndex + 1) & 7;
+
+        double slidingAvg = 0.0;
+        for (int k = 0; k < 8; k++)
+        {
+            slidingAvg += _crestRingBuffer[k];
+        }
+        slidingAvg /= 8.0;
+
+        if (slidingAvg > 0.001)
+        {
+            if (_crestWarmupCount < 8)
+            {
+                _crestWarmupCount++;
+            }
+            else
+            {
+                _crestSum += slidingAvg;
+                _crestAvgDb = 20.0 * Math.Log10(_crestSum / _crestCount);
+                _crestCount++;
+            }
+            _currentInstantCrestDb = 20.0 * Math.Log10(slidingAvg);
+        }
+        else
+        {
+            _currentInstantCrestDb = 0.0;
+        }
+
+        _crestSampleInBlock = 0;
+        _crestBlockPeak[0] = 0.0;
+        _crestBlockPeak[1] = 0.0;
+        _crestBlockSumSq[0] = 0.0;
+        _crestBlockSumSq[1] = 0.0;
+    }
+
     /// <summary>
     /// Returns the current peak and RMS results.
     /// </summary>
     public LevelsResult CalculateResult()
     {
+        if (_crestSampleInBlock >= 256)
+        {
+            UpdateCrestBlock();
+        }
+
         double spLeftDb = _samplePeakMax[0] > 1e-6 ? 20.0 * Math.Log10(_samplePeakMax[0]) : -100.0;
         double spRightDb = _channelCount > 1 && _samplePeakMax[1] > 1e-6 ? 20.0 * Math.Log10(_samplePeakMax[1]) : spLeftDb;
 
@@ -273,7 +402,7 @@ public sealed class TruePeakMeter
 
         double maxPeak = Math.Max(_samplePeakMax[0], _channelCount > 1 ? _samplePeakMax[1] : 0.0);
         double avgRms = (rmsLeft + rmsRight) / 2.0;
-        double crestDb = (maxPeak > 1e-6 && avgRms > 1e-6) ? 20.0 * Math.Log10(maxPeak / avgRms) : 0.0;
+        double crestDb = (_crestCount > 1) ? _crestAvgDb : ((maxPeak > 1e-6 && avgRms > 1e-6) ? 20.0 * Math.Log10(maxPeak / avgRms) : 0.0);
 
         double drDb = Math.Max(0.0, Math.Round(crestDb, 1));
 
@@ -303,6 +432,16 @@ public sealed class TruePeakMeter
             _truePeakMax[ch] = 0.0;
             _sumSquares[ch] = 0.0;
         }
+        _crestSampleInBlock = 0;
+        Array.Clear(_crestBlockPeak);
+        Array.Clear(_crestBlockSumSq);
+        Array.Clear(_crestRingBuffer);
+        _crestRingIndex = 0;
+        _crestWarmupCount = 0;
+        _crestSum = 0.0;
+        _crestCount = 1;
+        _crestAvgDb = 0.0;
+        _currentInstantCrestDb = 0.0;
         _totalFrames = 0;
     }
 }

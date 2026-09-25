@@ -69,7 +69,13 @@ public partial class MainViewModel : ViewModelBase
     private double _integratedLoudness = -70.0;
 
     [ObservableProperty]
+    private double _momentaryCurrent = -60.0;
+
+    [ObservableProperty]
     private double _momentaryMax = -70.0;
+
+    [ObservableProperty]
+    private double _shortTermCurrent = -60.0;
 
     [ObservableProperty]
     private double _shortTermMax = -70.0;
@@ -203,6 +209,10 @@ public partial class MainViewModel : ViewModelBase
         IsAnalyzing = true;
         AnalysisProgress = 0.0;
         TrackProgress = 0.0;
+        MomentaryCurrent = -60.0;
+        MomentaryMax = -60.0;
+        ShortTermCurrent = -60.0;
+        ShortTermMax = -60.0;
         PeakHistory = InitializeHistory(-60.0);
         LoudnessHistory = InitializeHistory(-60.0);
         FilePath = path;
@@ -259,8 +269,15 @@ public partial class MainViewModel : ViewModelBase
         AnalysisProgress = s.ProgressFraction * 100.0;
         TrackProgress = s.ProgressFraction;
         IntegratedLoudness = s.RunningIntegratedLufs;
-        MomentaryMax = s.MomentaryLufs;
-        ShortTermMax = s.ShortTermLufs;
+
+        MomentaryCurrent = s.MomentaryLufs;
+        if (s.MomentaryLufs > MomentaryMax)
+            MomentaryMax = s.MomentaryLufs;
+
+        ShortTermCurrent = s.ShortTermLufs;
+        if (s.ShortTermLufs > ShortTermMax)
+            ShortTermMax = s.ShortTermLufs;
+
         if (s.RunningLra > 0.0)
         {
             LoudnessRange = s.RunningLra;
@@ -278,9 +295,9 @@ public partial class MainViewModel : ViewModelBase
         {
             Plr = Math.Max(0.0, currentMaxPeak - s.RunningIntegratedLufs);
         }
-        if (s.CurrentPeakLeftDb > -60.0 && s.CurrentRmsLeftDb > -60.0)
+        if (s.RunningCrestDb > 0.0)
         {
-            CrestFactor = Math.Max(0.0, s.CurrentPeakLeftDb - s.CurrentRmsLeftDb);
+            CrestFactor = s.RunningCrestDb;
         }
 
         PhaseCorrelation = s.Correlation;
@@ -338,7 +355,9 @@ public partial class MainViewModel : ViewModelBase
     private void UpdateFromReport(FullAnalysisReport r)
     {
         IntegratedLoudness = r.Loudness.IntegratedLoudness;
+        MomentaryCurrent = -60.0;
         MomentaryMax = r.Loudness.MomentaryMax;
+        ShortTermCurrent = -60.0;
         ShortTermMax = r.Loudness.ShortTermMax;
         LoudnessRange = r.Loudness.LoudnessRange;
 
