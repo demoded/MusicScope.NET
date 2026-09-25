@@ -57,14 +57,17 @@ public static class WindowFunctions
                 break;
 
             case WindowType.BlackmanHarris:
-                // 4-term Blackman-Harris (optimal side-lobe attenuation ~92 dB)
+                // 7-term minimum side-lobe Blackman-Harris window (MusicScope SpectrumModule.java / FFTConvolver.java)
                 for (int i = 0; i < length; i++)
                 {
-                    double a = 2.0 * Math.PI * i / nMinusOne;
-                    window[i] = 0.35875 
-                              - 0.48829 * Math.Cos(a) 
-                              + 0.14128 * Math.Cos(2.0 * a) 
-                              - 0.01168 * Math.Cos(3.0 * a);
+                    double d = 2.0 * Math.PI * i / nMinusOne;
+                    window[i] = 0.27105140069342
+                              - 0.43329793923448 * Math.Cos(d)
+                              + 0.21812299954311 * Math.Cos(2.0 * d)
+                              - 0.06592544638803 * Math.Cos(3.0 * d)
+                              + 0.01081174209837 * Math.Cos(4.0 * d)
+                              - 7.7658482522e-4  * Math.Cos(5.0 * d)
+                              + 1.388721735e-5   * Math.Cos(6.0 * d);
                 }
                 break;
 

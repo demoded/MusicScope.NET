@@ -23,11 +23,18 @@ public sealed class AudioAnalysisEngine
     private readonly double[] _fftWindow;
 
     private const int FftSize = 2048;
-    private const int FftStride = 2048; // Compute FFT every 2048 audio frames (~46ms at 44.1kHz)
+    private readonly int _fftStride;
     private int _framesSinceLastFft;
-    private readonly double[] _fftRealBuffer = new double[FftSize];
-    private readonly double[] _fftImagBuffer = new double[FftSize];
-    private readonly double[] _accumulatedSpectrum = new double[FftSize / 2];
+    private int _bufferedFrames;
+    private int _ringBufferPos;
+    private readonly double[] _ringBufferLeft = new double[FftSize];
+    private readonly double[] _ringBufferRight = new double[FftSize];
+    private readonly double[] _fftRealBufferLeft = new double[FftSize];
+    private readonly double[] _fftImagBufferLeft = new double[FftSize];
+    private readonly double[] _fftRealBufferRight = new double[FftSize];
+    private readonly double[] _fftImagBufferRight = new double[FftSize];
+    private readonly double[] _smoothedSpectrum = new double[FftSize / 2];
+    private readonly double[] _peakHoldSpectrum = new double[FftSize / 2];
     private readonly double[] _latestInstantSpectrumDb = new double[FftSize / 2];
     private readonly double[] _peakHoldSpectrumDb = new double[FftSize / 2];
     private int _spectrumFftCount;
@@ -65,8 +72,11 @@ public sealed class AudioAnalysisEngine
         _truePeakMeter = new TruePeakMeter(channelCount, sampleRate);
         _stereoAnalyzer = new StereoAnalyzer();
 
+        _fftStride = Math.Max(FftSize, (int)(sampleRate * 0.050));
         _fft = new FastFourierTransform(FftSize);
         _fftWindow = WindowFunctions.Create(WindowType.BlackmanHarris, FftSize);
+        Array.Fill(_smoothedSpectrum, 1e-10);
+        Array.Fill(_peakHoldSpectrum, 1e-10);
         Array.Fill(_latestInstantSpectrumDb, -140.0);
         Array.Fill(_peakHoldSpectrumDb, -140.0);
         Array.Fill(_peakHistory, -60.0);
@@ -86,95 +96,23 @@ public sealed class AudioAnalysisEngine
             _stereoAnalyzer.ProcessInterleaved(interleavedSamples);
         }
 
-        // Perform periodic FFT on mono downmix
+        // Feed circular buffers and execute FFT every 50ms (matching MusicScope SystemController.java & SpectrumModule.java)
         int frameCount = interleavedSamples.Length / _channelCount;
-        int i = 0;
-        while (i < frameCount)
+        for (int i = 0; i < frameCount; i++)
         {
-            int framesNeeded = FftStride - _framesSinceLastFft;
-            if (framesNeeded > 0)
+            int sampleIdx = i * _channelCount;
+            float left = interleavedSamples[sampleIdx];
+            float right = _channelCount >= 2 ? interleavedSamples[sampleIdx + 1] : left;
+
+            _ringBufferLeft[_ringBufferPos] = left;
+            _ringBufferRight[_ringBufferPos] = right;
+            _ringBufferPos = (_ringBufferPos + 1) % FftSize;
+            _bufferedFrames++;
+            _framesSinceLastFft++;
+
+            if (_bufferedFrames >= FftSize && _framesSinceLastFft >= _fftStride)
             {
-                int step = Math.Min(framesNeeded, frameCount - i);
-                _framesSinceLastFft += step;
-                i += step;
-                if (_framesSinceLastFft < FftStride)
-                    break;
-            }
-
-            if (i + FftSize <= frameCount)
-            {
-                _framesSinceLastFft = 0;
-
-                for (int k = 0; k < FftSize; k++)
-                {
-                    int sampleIdx = (i + k) * _channelCount;
-                    float mono = 0f;
-                    for (int ch = 0; ch < _channelCount; ch++)
-                    {
-                        mono += interleavedSamples[sampleIdx + ch];
-                    }
-                    mono /= _channelCount;
-
-                    _fftRealBuffer[k] = mono * _fftWindow[k];
-                    _fftImagBuffer[k] = 0.0;
-                }
-
-                _fft.Forward(_fftRealBuffer, _fftImagBuffer);
-
-                // Blackman-Harris coherent gain is 0.35875
-                double scale = 2.0 / (FftSize * 0.35875);
-
-                // Determine row in 250-row spectrogram
-                // matching MusicScope WaterfallControl.java lines 344-350
-                int specRow = _totalFrames > 0
-                    ? Math.Clamp((int)((double)(_processedFrames + i) / _totalFrames * SpectrogramRows), 0, SpectrogramRows - 1)
-                    : Math.Clamp(_spectrumFftCount % SpectrogramRows, 0, SpectrogramRows - 1);
-
-                int rowOffset = specRow * SpectrogramCols;
-                bool isFirstInRow = (_spectrogramRowCount[specRow] == 0);
-                _spectrogramRowCount[specRow]++;
-
-                for (int b = 0; b < FftSize / 2; b++)
-                {
-                    double magSq = _fftRealBuffer[b] * _fftRealBuffer[b] + _fftImagBuffer[b] * _fftImagBuffer[b];
-                    _accumulatedSpectrum[b] += magSq;
-
-                    double instantMag = Math.Sqrt(magSq) * scale;
-                    double instantDb = instantMag > 1e-7 ? Math.Max(-140.0, 20.0 * Math.Log10(instantMag)) : -140.0;
-
-                    // Instantaneous smoothed display for live dancing
-                    _latestInstantSpectrumDb[b] = _latestInstantSpectrumDb[b] * 0.4 + instantDb * 0.6;
-
-                    // Cumulative peak hold across the entire track
-                    if (instantDb > _peakHoldSpectrumDb[b])
-                    {
-                        _peakHoldSpectrumDb[b] = instantDb;
-                    }
-
-                    // Accumulate linear magnitude into 2D spectrogram buffers (250 rows x 1024 cols)
-                    float linMag = (float)instantMag;
-                    int idx = rowOffset + b;
-                    if (isFirstInRow)
-                    {
-                        _spectrogramMax[idx] = linMag;
-                        _spectrogramAvg[idx] = linMag;
-                        _spectrogramMin[idx] = linMag;
-                    }
-                    else
-                    {
-                        if (linMag > _spectrogramMax[idx]) _spectrogramMax[idx] = linMag;
-                        if (linMag < _spectrogramMin[idx]) _spectrogramMin[idx] = linMag;
-                        _spectrogramAvg[idx] += linMag;
-                    }
-                }
-
-                _spectrumFftCount++;
-                i += FftSize;
-            }
-            else
-            {
-                _framesSinceLastFft += (frameCount - i);
-                break;
+                ExecuteFft(_processedFrames + i);
             }
         }
 
@@ -289,11 +227,91 @@ public sealed class AudioAnalysisEngine
         };
     }
 
+    private void ExecuteFft(long currentFrame)
+    {
+        _framesSinceLastFft = 0;
+
+        int n3 = _ringBufferPos;
+        for (int n = 0; n < FftSize; n++)
+        {
+            _fftRealBufferLeft[n] = _fftWindow[n] * _ringBufferLeft[n3];
+            _fftImagBufferLeft[n] = 0.0;
+            _fftRealBufferRight[n] = _fftWindow[n] * _ringBufferRight[n3];
+            _fftImagBufferRight[n] = 0.0;
+            if (++n3 >= FftSize) n3 = 0;
+        }
+
+        _fft.Forward(_fftRealBufferLeft, _fftImagBufferLeft);
+        _fft.Forward(_fftRealBufferRight, _fftImagBufferRight);
+
+        // MusicScope SpectrumModule.java lines 56, 120-121: normalizes by (FFT / 8) = 256.0
+        double normFactor = FftSize / 8.0;
+
+        // Determine row in 250-row spectrogram
+        // matching MusicScope WaterfallControl.java lines 344-350
+        int specRow = _totalFrames > 0
+            ? Math.Clamp((int)((double)currentFrame / _totalFrames * SpectrogramRows), 0, SpectrogramRows - 1)
+            : Math.Clamp(_spectrumFftCount % SpectrogramRows, 0, SpectrogramRows - 1);
+
+        int rowOffset = specRow * SpectrogramCols;
+        bool isFirstInRow = (_spectrogramRowCount[specRow] == 0);
+        _spectrogramRowCount[specRow]++;
+
+        for (int b = 0; b < FftSize / 2; b++)
+        {
+            double reL = _fftRealBufferLeft[b] / normFactor;
+            double imL = _fftImagBufferLeft[b] / normFactor;
+            double dL = Math.Sqrt(reL * reL + imL * imL);
+
+            double reR = _fftRealBufferRight[b] / normFactor;
+            double imR = _fftImagBufferRight[b] / normFactor;
+            double dR = Math.Sqrt(reR * reR + imR * imR);
+
+            double instant = (dL + dR) / 2.0;
+
+            // Recursive 50% single-pole IIR filter matching SpectrumModule.java line 167
+            _smoothedSpectrum[b] = (_smoothedSpectrum[b] + instant) / 2.0;
+            if (_smoothedSpectrum[b] < 1e-10)
+                _smoothedSpectrum[b] = 1e-10;
+
+            // Cumulative peak-hold of smoothed magnitude matching SpectrumControl.java line 398-399
+            if (_smoothedSpectrum[b] > _peakHoldSpectrum[b])
+                _peakHoldSpectrum[b] = _smoothedSpectrum[b];
+
+            _latestInstantSpectrumDb[b] = 20.0 * Math.Log10(_smoothedSpectrum[b]);
+            _peakHoldSpectrumDb[b] = 20.0 * Math.Log10(_peakHoldSpectrum[b]);
+
+            // Accumulate linear magnitude into 2D spectrogram buffers (250 rows x 1024 cols)
+            // matching WaterfallControl.java line 344-350
+            float linMag = (float)_smoothedSpectrum[b];
+            int idx = rowOffset + b;
+            if (isFirstInRow)
+            {
+                _spectrogramMax[idx] = linMag;
+                _spectrogramAvg[idx] = linMag;
+                _spectrogramMin[idx] = linMag;
+            }
+            else
+            {
+                if (linMag > _spectrogramMax[idx]) _spectrogramMax[idx] = linMag;
+                if (linMag < _spectrogramMin[idx]) _spectrogramMin[idx] = linMag;
+                _spectrogramAvg[idx] += linMag;
+            }
+        }
+
+        _spectrumFftCount++;
+    }
+
     /// <summary>
     /// Generates the complete analysis report.
     /// </summary>
     public FullAnalysisReport GenerateReport(string title = "", string filePath = "", string format = "", TimeSpan duration = default, int bitDepth = 16)
     {
+        if (_bufferedFrames >= FftSize && _framesSinceLastFft > 0)
+        {
+            ExecuteFft(_processedFrames);
+        }
+
         var loudnessResult = _loudnessMeter.CalculateResult();
         var levelsResult = _truePeakMeter.CalculateResult();
         var stereoResult = _channelCount >= 2 ? _stereoAnalyzer.CalculateResult() : new StereoResult();
@@ -349,7 +367,13 @@ public sealed class AudioAnalysisEngine
         _loudnessMeter.Reset();
         _truePeakMeter.Reset();
         _stereoAnalyzer.Reset();
-        Array.Clear(_accumulatedSpectrum, 0, _accumulatedSpectrum.Length);
+        _bufferedFrames = 0;
+        _framesSinceLastFft = 0;
+        _ringBufferPos = 0;
+        Array.Clear(_ringBufferLeft, 0, _ringBufferLeft.Length);
+        Array.Clear(_ringBufferRight, 0, _ringBufferRight.Length);
+        Array.Fill(_smoothedSpectrum, 1e-10);
+        Array.Fill(_peakHoldSpectrum, 1e-10);
         Array.Fill(_peakHoldSpectrumDb, -140.0);
         Array.Fill(_latestInstantSpectrumDb, -140.0);
         Array.Fill(_peakHistory, -60.0);
