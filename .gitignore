@@ -4,11 +4,14 @@
 **/publish/
 
 # Tools & Decompiled cache
-tools/
+tools/src-decompiled/
+__pycache__/
+*.pyc
 publish/
 
 # Bundled legacy Java App
-OriginalJavaApp/
+OriginalJavaApp/jre/
+OriginalJavaApp/lib/
 
 # User-specific files
 *.user
