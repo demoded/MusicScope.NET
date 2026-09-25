@@ -38,6 +38,14 @@ public sealed class AudioAnalysisEngine
     public const int HistoryBinCount = 512;
     private readonly double[] _peakHistory = new double[HistoryBinCount];
     private readonly double[] _loudnessHistory = new double[HistoryBinCount];
+
+    public const int SpectrogramRows = 250;
+    public const int SpectrogramCols = 1024;
+    private readonly float[] _spectrogramMax = new float[SpectrogramRows * SpectrogramCols];
+    private readonly float[] _spectrogramAvg = new float[SpectrogramRows * SpectrogramCols];
+    private readonly float[] _spectrogramMin = new float[SpectrogramRows * SpectrogramCols];
+    private readonly int[] _spectrogramRowCount = new int[SpectrogramRows];
+
     private long _totalFrames;
     private long _processedFrames;
 
@@ -115,6 +123,17 @@ public sealed class AudioAnalysisEngine
 
                 // Blackman-Harris coherent gain is 0.35875
                 double scale = 2.0 / (FftSize * 0.35875);
+
+                // Determine row in 250-row spectrogram
+                // matching MusicScope WaterfallControl.java lines 344-350
+                int specRow = _totalFrames > 0
+                    ? Math.Clamp((int)((double)(_processedFrames + i) / _totalFrames * SpectrogramRows), 0, SpectrogramRows - 1)
+                    : Math.Clamp(_spectrumFftCount % SpectrogramRows, 0, SpectrogramRows - 1);
+
+                int rowOffset = specRow * SpectrogramCols;
+                bool isFirstInRow = (_spectrogramRowCount[specRow] == 0);
+                _spectrogramRowCount[specRow]++;
+
                 for (int b = 0; b < FftSize / 2; b++)
                 {
                     double magSq = _fftRealBuffer[b] * _fftRealBuffer[b] + _fftImagBuffer[b] * _fftImagBuffer[b];
@@ -122,7 +141,7 @@ public sealed class AudioAnalysisEngine
 
                     double instantMag = Math.Sqrt(magSq) * scale;
                     double instantDb = instantMag > 1e-7 ? Math.Max(-140.0, 20.0 * Math.Log10(instantMag)) : -140.0;
-                    
+
                     // Instantaneous smoothed display for live dancing
                     _latestInstantSpectrumDb[b] = _latestInstantSpectrumDb[b] * 0.4 + instantDb * 0.6;
 
@@ -131,7 +150,24 @@ public sealed class AudioAnalysisEngine
                     {
                         _peakHoldSpectrumDb[b] = instantDb;
                     }
+
+                    // Accumulate linear magnitude into 2D spectrogram buffers (250 rows x 1024 cols)
+                    float linMag = (float)instantMag;
+                    int idx = rowOffset + b;
+                    if (isFirstInRow)
+                    {
+                        _spectrogramMax[idx] = linMag;
+                        _spectrogramAvg[idx] = linMag;
+                        _spectrogramMin[idx] = linMag;
+                    }
+                    else
+                    {
+                        if (linMag > _spectrogramMax[idx]) _spectrogramMax[idx] = linMag;
+                        if (linMag < _spectrogramMin[idx]) _spectrogramMin[idx] = linMag;
+                        _spectrogramAvg[idx] += linMag;
+                    }
                 }
+
                 _spectrumFftCount++;
                 i += FftSize;
             }
@@ -242,6 +278,10 @@ public sealed class AudioAnalysisEngine
             CumulativePeakSpectrumDb = peakHoldCopy,
             PeakHistory = peakHistoryCopy,
             LoudnessHistory = loudnessHistoryCopy,
+            SpectrogramMax = _spectrogramMax,
+            SpectrogramAvg = _spectrogramAvg,
+            SpectrogramMin = _spectrogramMin,
+            SpectrogramRowCount = _spectrogramRowCount,
             GoniometerPointsX = gonioX,
             GoniometerPointsY = gonioY
         };
@@ -291,7 +331,11 @@ public sealed class AudioAnalysisEngine
             Stereo = stereoResult,
             SpectrumMagnitudesDb = finalSpectrumDb,
             PeakHistory = finalPeakHistory,
-            LoudnessHistory = finalLoudnessHistory
+            LoudnessHistory = finalLoudnessHistory,
+            SpectrogramMax = (float[])_spectrogramMax.Clone(),
+            SpectrogramAvg = (float[])_spectrogramAvg.Clone(),
+            SpectrogramMin = (float[])_spectrogramMin.Clone(),
+            SpectrogramRowCount = (int[])_spectrogramRowCount.Clone()
         };
     }
 
@@ -308,6 +352,10 @@ public sealed class AudioAnalysisEngine
         Array.Fill(_latestInstantSpectrumDb, -140.0);
         Array.Fill(_peakHistory, -60.0);
         Array.Fill(_loudnessHistory, -60.0);
+        Array.Clear(_spectrogramMax, 0, _spectrogramMax.Length);
+        Array.Clear(_spectrogramAvg, 0, _spectrogramAvg.Length);
+        Array.Clear(_spectrogramMin, 0, _spectrogramMin.Length);
+        Array.Clear(_spectrogramRowCount, 0, _spectrogramRowCount.Length);
         _processedFrames = 0;
         _spectrumFftCount = 0;
     }

@@ -11,7 +11,7 @@ namespace MusicScope.Desktop.Controls;
 
 /// <summary>
 /// 2D Spectrogram / Waterfall Control directly modeling the bottom row of the MusicScope UI.
-/// Maps frequency bins along the X-axis and track playback progression (0% to 100%) along the Y-axis.
+/// Maps frequency bins (1024 cols) along the X-axis and track playback progression (250 rows) along the Y-axis.
 /// Supports clickable buttons in the left axis:
 ///  - MAX / AVG / MIN: switches magnitude aggregation mode
 ///  - BRY / MON / COL: switches heatmap colormap (Bright Red-Yellow / Monochrome Green / Rainbow Color)
@@ -21,6 +21,18 @@ public sealed class WaterfallControl : Control
 {
     public static readonly StyledProperty<double[]?> LatestSpectrumProperty =
         AvaloniaProperty.Register<WaterfallControl, double[]?>(nameof(LatestSpectrum));
+
+    public static readonly StyledProperty<float[]?> SpectrogramMaxProperty =
+        AvaloniaProperty.Register<WaterfallControl, float[]?>(nameof(SpectrogramMax));
+
+    public static readonly StyledProperty<float[]?> SpectrogramAvgProperty =
+        AvaloniaProperty.Register<WaterfallControl, float[]?>(nameof(SpectrogramAvg));
+
+    public static readonly StyledProperty<float[]?> SpectrogramMinProperty =
+        AvaloniaProperty.Register<WaterfallControl, float[]?>(nameof(SpectrogramMin));
+
+    public static readonly StyledProperty<int[]?> SpectrogramRowCountProperty =
+        AvaloniaProperty.Register<WaterfallControl, int[]?>(nameof(SpectrogramRowCount));
 
     public static readonly StyledProperty<double> TrackProgressProperty =
         AvaloniaProperty.Register<WaterfallControl, double>(nameof(TrackProgress), 0.0);
@@ -44,6 +56,30 @@ public sealed class WaterfallControl : Control
     {
         get => GetValue(LatestSpectrumProperty);
         set => SetValue(LatestSpectrumProperty, value);
+    }
+
+    public float[]? SpectrogramMax
+    {
+        get => GetValue(SpectrogramMaxProperty);
+        set => SetValue(SpectrogramMaxProperty, value);
+    }
+
+    public float[]? SpectrogramAvg
+    {
+        get => GetValue(SpectrogramAvgProperty);
+        set => SetValue(SpectrogramAvgProperty, value);
+    }
+
+    public float[]? SpectrogramMin
+    {
+        get => GetValue(SpectrogramMinProperty);
+        set => SetValue(SpectrogramMinProperty, value);
+    }
+
+    public int[]? SpectrogramRowCount
+    {
+        get => GetValue(SpectrogramRowCountProperty);
+        set => SetValue(SpectrogramRowCountProperty, value);
     }
 
     public double TrackProgress
@@ -82,157 +118,68 @@ public sealed class WaterfallControl : Control
         set => SetValue(ShowCutOffFrequencyProperty, value);
     }
 
-    private const int BitmapWidth = 512;
-    private const int BitmapHeight = 250;
+    public const int BitmapWidth = 1024;
+    public const int BitmapHeight = 250;
     private readonly WriteableBitmap _bitmap;
     private int _lastRenderedRow = -1;
 
-    // Multi-mode row buffers for MAX, AVG, MIN
-    private readonly float[,] _rowMaxDb = new float[BitmapHeight, BitmapWidth];
-    private readonly float[,] _rowAvgDb = new float[BitmapHeight, BitmapWidth];
-    private readonly float[,] _rowMinDb = new float[BitmapHeight, BitmapWidth];
-    private readonly int[] _rowCount = new int[BitmapHeight];
-
-    // Precomputed 256-color palettes (ARGB)
-    private static readonly uint[] PaletteBry = InitializeBryPalette();
-    private static readonly uint[] PaletteCol = InitializeColPalette();
+    // Palettes matching original MusicScope Java WaterfallControl.java
     private static readonly uint[] PaletteMon = InitializeMonPalette();
-
-    private static uint[] InitializeBryPalette()
-    {
-        uint[] pal = new uint[256];
-        for (int i = 0; i < 256; i++)
-        {
-            double t = i / 255.0;
-            byte r, g, b;
-
-            if (t < 0.20) // Deep navy to purple
-            {
-                double u = t / 0.20;
-                r = (byte)(u * 80);
-                g = 0;
-                b = (byte)(40 + u * 120);
-            }
-            else if (t < 0.45) // Purple to magenta / hot pink
-            {
-                double u = (t - 0.20) / 0.25;
-                r = (byte)(80 + u * 160);
-                g = (byte)(u * 20);
-                b = (byte)(160 - u * 80);
-            }
-            else if (t < 0.75) // Hot pink to vivid orange
-            {
-                double u = (t - 0.45) / 0.30;
-                r = 255;
-                g = (byte)(20 + u * 140);
-                b = (byte)(80 * (1.0 - u));
-            }
-            else if (t < 0.92) // Orange to bright yellow
-            {
-                double u = (t - 0.75) / 0.17;
-                r = 255;
-                g = (byte)(160 + u * 80);
-                b = (byte)(u * 40);
-            }
-            else // Yellow to white
-            {
-                double u = (t - 0.92) / 0.08;
-                r = 255;
-                g = (byte)(240 + u * 15);
-                b = (byte)(40 + u * 215);
-            }
-
-            pal[i] = 0xFF000000 | ((uint)r << 16) | ((uint)g << 8) | b;
-        }
-        return pal;
-    }
-
-    private static uint[] InitializeColPalette()
-    {
-        uint[] pal = new uint[256];
-        for (int i = 0; i < 256; i++)
-        {
-            double t = i / 255.0;
-            byte r, g, b;
-
-            if (t < 0.15) // Black to dark blue
-            {
-                double u = t / 0.15;
-                r = 0;
-                g = 0;
-                b = (byte)(u * 160);
-            }
-            else if (t < 0.35) // Blue to cyan
-            {
-                double u = (t - 0.15) / 0.20;
-                r = 0;
-                g = (byte)(u * 220);
-                b = 255;
-            }
-            else if (t < 0.55) // Cyan to green
-            {
-                double u = (t - 0.35) / 0.20;
-                r = 0;
-                g = 255;
-                b = (byte)(255 * (1.0 - u));
-            }
-            else if (t < 0.75) // Green to yellow
-            {
-                double u = (t - 0.55) / 0.20;
-                r = (byte)(u * 255);
-                g = 255;
-                b = 0;
-            }
-            else if (t < 0.90) // Yellow to orange-red
-            {
-                double u = (t - 0.75) / 0.15;
-                r = 255;
-                g = (byte)(255 * (1.0 - u * 0.7));
-                b = 0;
-            }
-            else // Red to dark red
-            {
-                double u = (t - 0.90) / 0.10;
-                r = 255;
-                g = (byte)(75 * (1.0 - u));
-                b = (byte)(u * 80);
-            }
-
-            pal[i] = 0xFF000000 | ((uint)r << 16) | ((uint)g << 8) | b;
-        }
-        return pal;
-    }
+    private static readonly uint[] PaletteCol = InitializeColPalette();
+    private static readonly uint[] PaletteBry = InitializeBryPalette();
 
     private static uint[] InitializeMonPalette()
     {
         uint[] pal = new uint[256];
         for (int i = 0; i < 256; i++)
         {
-            double t = i / 255.0;
-            byte r, g, b;
-
-            if (t < 0.05)
-            {
-                r = 0; g = 0; b = 0;
-            }
-            else
-            {
-                double u = (t - 0.05) / 0.95;
-                r = (byte)(20 * u);
-                g = (byte)(40 + 215 * u);
-                b = (byte)(30 * u);
-            }
-
-            pal[i] = 0xFF000000 | ((uint)r << 16) | ((uint)g << 8) | b;
+            pal[i] = 0xFF000000u | ((uint)i << 8);
         }
+        return pal;
+    }
+
+    private static uint[] InitializeColPalette()
+    {
+        uint[] pal = new uint[896];
+        int r = 0, g = 0, b = 0;
+        for (int i = 0; i < 128; i++) pal[i] = 0xFF000000u | ((uint)r << 16) | ((uint)g << 8) | (uint)b++;
+        r = 0; g = 0; b = 127;
+        for (int i = 128; i < 256; i++) { pal[i] = 0xFF000000u | ((uint)r << 16) | ((uint)g << 8) | (uint)b++; g++; }
+        r = 0; g = 127; b = 255;
+        for (int i = 256; i < 384; i++) { pal[i] = 0xFF000000u | ((uint)r << 16) | ((uint)g << 8) | (uint)b--; g++; }
+        r = 0; g = 255; b = 127;
+        for (int i = 384; i < 512; i++) { pal[i] = 0xFF000000u | ((uint)r << 16) | ((uint)g << 8) | (uint)b--; r++; }
+        r = 127; g = 255; b = 0;
+        for (int i = 512; i < 640; i++) { pal[i] = 0xFF000000u | ((uint)r << 16) | ((uint)g << 8) | (uint)b; r++; }
+        r = 255; g = 255; b = 0;
+        for (int i = 640; i < 768; i++) { pal[i] = 0xFF000000u | ((uint)r << 16) | ((uint)g << 8) | (uint)b; g--; }
+        r = 255; g = 127; b = 0;
+        for (int i = 768; i < 896; i++) { pal[i] = 0xFF000000u | ((uint)r << 16) | ((uint)g << 8) | (uint)b; g--; }
+        return pal;
+    }
+
+    private static uint[] InitializeBryPalette()
+    {
+        uint[] pal = new uint[640];
+        int r = 0, g = 0, b = 0;
+        for (int i = 0; i < 128; i++) pal[i] = 0xFF000000u | ((uint)r << 16) | ((uint)g << 8) | (uint)b++;
+        r = 0; g = 0; b = 127;
+        for (int i = 128; i < 256; i++) { pal[i] = 0xFF000000u | ((uint)r << 16) | ((uint)g << 8) | (uint)b++; r++; }
+        r = 127; g = 0; b = 255;
+        for (int i = 256; i < 384; i++) { pal[i] = 0xFF000000u | ((uint)r << 16) | ((uint)g << 8) | (uint)b--; r++; }
+        r = 255; g = 0; b = 127;
+        for (int i = 384; i < 512; i++) { pal[i] = 0xFF000000u | ((uint)r << 16) | ((uint)g << 8) | (uint)b--; g++; }
+        r = 255; g = 127; b = 0;
+        for (int i = 512; i < 640; i++) { pal[i] = 0xFF000000u | ((uint)r << 16) | ((uint)g << 8) | (uint)b; g++; }
         return pal;
     }
 
     private static readonly IBrush BgBrush = new SolidColorBrush(Color.FromRgb(0, 0, 0));
     private static readonly IBrush AxisTextBrush = new SolidColorBrush(Color.FromRgb(200, 205, 210));
-    private static readonly IBrush GreenAnnotationBrush = new SolidColorBrush(Color.FromRgb(0, 220, 0));
+    private static readonly IBrush GreenAnnotationBrush = new SolidColorBrush(Color.FromRgb(0, 255, 0));
     private static readonly IBrush DimAnnotationBrush = new SolidColorBrush(Color.FromRgb(102, 102, 102));
     private static readonly IPen RedCutoffPen = new Pen(new SolidColorBrush(Color.FromRgb(255, 0, 0)), 2.0);
+    private static readonly IPen GridPen = new Pen(new SolidColorBrush(Color.FromRgb(50, 50, 50)), 1.0);
 
     // Hit-testing cached metrics
     private double _leftMargin = 38.0;
@@ -253,78 +200,90 @@ public sealed class WaterfallControl : Control
 
     private void ClearBitmap()
     {
-        uint[] palette = ColormapMode switch
-        {
-            0 => PaletteMon,
-            1 => PaletteCol,
-            _ => PaletteBry
-        };
-
         using var fb = _bitmap.Lock();
         unsafe
         {
             uint* ptr = (uint*)fb.Address;
             int total = BitmapWidth * BitmapHeight;
-            uint bgPixel = palette[0];
             for (int i = 0; i < total; i++)
             {
-                ptr[i] = bgPixel;
+                ptr[i] = 0xFF000000u;
             }
         }
-        Array.Clear(_rowMaxDb);
-        Array.Clear(_rowAvgDb);
-        Array.Clear(_rowMinDb);
-        Array.Clear(_rowCount);
         _lastRenderedRow = -1;
     }
 
     private void RebuildBitmap()
     {
-        uint[] palette = ColormapMode switch
-        {
-            0 => PaletteMon,
-            1 => PaletteCol,
-            _ => PaletteBry
-        };
+        float[]? srcMax = SpectrogramMax;
+        float[]? srcAvg = SpectrogramAvg;
+        float[]? srcMin = SpectrogramMin;
+        int[]? rowCounts = SpectrogramRowCount;
 
         using var fb = _bitmap.Lock();
         unsafe
         {
             uint* ptr = (uint*)fb.Address;
-            uint bg = palette[0];
 
             for (int r = 0; r < BitmapHeight; r++)
             {
                 uint* rowPtr = ptr + r * BitmapWidth;
-                if (r > _lastRenderedRow || _rowCount[r] == 0)
+                int count = (rowCounts != null && r < rowCounts.Length) ? rowCounts[r] : 0;
+                if (count == 0)
                 {
                     for (int c = 0; c < BitmapWidth; c++)
-                        rowPtr[c] = bg;
+                        rowPtr[c] = 0xFF000000u;
                     continue;
                 }
 
-                int count = Math.Max(1, _rowCount[r]);
+                int rowOffset = r * BitmapWidth;
                 for (int c = 0; c < BitmapWidth; c++)
                 {
-                    float db = AggregationMode switch
+                    float mag = 0f;
+                    if (srcMax != null && srcAvg != null && srcMin != null && (rowOffset + c) < srcMax.Length)
                     {
-                        1 => _rowAvgDb[r, c] / count,
-                        2 => _rowMinDb[r, c],
-                        _ => _rowMaxDb[r, c]
+                        mag = AggregationMode switch
+                        {
+                            1 => srcAvg[rowOffset + c] / count,
+                            2 => srcMin[rowOffset + c],
+                            _ => srcMax[rowOffset + c]
+                        };
+                    }
+
+                    double d = 70.4 * Math.Log10(mag * 6000.0 + 1.0);
+                    uint color = ColormapMode switch
+                    {
+                        0 => PaletteMon[Math.Clamp((int)d, 0, 255)],
+                        1 => PaletteCol[Math.Clamp((int)(3.5 * d), 0, 895)],
+                        _ => PaletteBry[Math.Clamp((int)(2.5 * d), 0, 639)]
                     };
-                    int palIdx = Math.Clamp((int)((db + 96.0f) * (255.0f / 96.0f)), 0, 255);
-                    rowPtr[c] = palette[palIdx];
+                    rowPtr[c] = color;
                 }
             }
+        }
+    }
+
+    protected override void OnPropertyChanged(AvaloniaPropertyChangedEventArgs change)
+    {
+        base.OnPropertyChanged(change);
+
+        if (change.Property == SpectrogramMaxProperty ||
+            change.Property == SpectrogramAvgProperty ||
+            change.Property == SpectrogramMinProperty ||
+            change.Property == SpectrogramRowCountProperty)
+        {
+            RebuildBitmap();
+            InvalidateVisual();
         }
     }
 
     static WaterfallControl()
     {
         AffectsRender<WaterfallControl>(
-            LatestSpectrumProperty, TrackProgressProperty, SampleRateProperty,
-            CutoffFrequencyHzProperty, AggregationModeProperty, ColormapModeProperty,
-            ShowCutOffFrequencyProperty);
+            LatestSpectrumProperty, SpectrogramMaxProperty, SpectrogramAvgProperty,
+            SpectrogramMinProperty, SpectrogramRowCountProperty, TrackProgressProperty,
+            SampleRateProperty, CutoffFrequencyHzProperty, AggregationModeProperty,
+            ColormapModeProperty, ShowCutOffFrequencyProperty);
     }
 
     /// <summary>
@@ -344,7 +303,7 @@ public sealed class WaterfallControl : Control
         if (pt.X <= _leftMargin)
         {
             // Button 1: MAX / AVG / MIN
-            if (Math.Abs(pt.Y - _yMax) <= 12)
+            if (Math.Abs(pt.Y - _yMax) <= 14)
             {
                 AggregationMode = (AggregationMode + 1) % 3;
                 RebuildBitmap();
@@ -352,7 +311,7 @@ public sealed class WaterfallControl : Control
                 e.Handled = true;
             }
             // Button 2: BRY / MON / COL
-            else if (Math.Abs(pt.Y - _yBry) <= 12)
+            else if (Math.Abs(pt.Y - _yBry) <= 14)
             {
                 ColormapMode = (ColormapMode + 1) % 3;
                 RebuildBitmap();
@@ -360,7 +319,7 @@ public sealed class WaterfallControl : Control
                 e.Handled = true;
             }
             // Button 3: COF
-            else if (Math.Abs(pt.Y - _yCof) <= 12)
+            else if (Math.Abs(pt.Y - _yCof) <= 14)
             {
                 ShowCutOffFrequency = !ShowCutOffFrequency;
                 InvalidateVisual();
@@ -375,7 +334,7 @@ public sealed class WaterfallControl : Control
         var pt = e.GetPosition(this);
 
         if (pt.X <= _leftMargin &&
-            (Math.Abs(pt.Y - _yMax) <= 12 || Math.Abs(pt.Y - _yBry) <= 12 || Math.Abs(pt.Y - _yCof) <= 12))
+            (Math.Abs(pt.Y - _yMax) <= 14 || Math.Abs(pt.Y - _yBry) <= 14 || Math.Abs(pt.Y - _yCof) <= 14))
         {
             Cursor = new Cursor(StandardCursorType.Hand);
         }
@@ -399,71 +358,57 @@ public sealed class WaterfallControl : Control
         double plotWidth = width - leftMargin - 10.0;
         double plotHeight = height - 10.0;
 
-        // Render newest row into bitmap based on TrackProgress
-        double[]? spectrum = LatestSpectrum;
-        if (spectrum != null && spectrum.Length > 0 && TrackProgress >= 0.0)
+        // Reset if new analysis starts
+        if (TrackProgress <= 0.001 && _lastRenderedRow > 10)
         {
-            int targetRow = Math.Clamp((int)(TrackProgress * (BitmapHeight - 1)), 0, BitmapHeight - 1);
-            if (targetRow < _lastRenderedRow)
-            {
-                ClearBitmap();
-            }
+            ClearBitmap();
+        }
 
-            if (targetRow >= _lastRenderedRow)
-            {
-                uint[] palette = ColormapMode switch
-                {
-                    0 => PaletteMon,
-                    1 => PaletteCol,
-                    _ => PaletteBry
-                };
+        // Render newest rows into bitmap based on Spectrogram buffers & TrackProgress
+        float[]? srcMax = SpectrogramMax;
+        float[]? srcAvg = SpectrogramAvg;
+        float[]? srcMin = SpectrogramMin;
+        int[]? rowCounts = SpectrogramRowCount;
 
+        if (srcMax != null && srcAvg != null && srcMin != null && rowCounts != null)
+        {
+            int targetRow = (TrackProgress >= 1.0)
+                ? BitmapHeight - 1
+                : Math.Clamp((int)(TrackProgress * (BitmapHeight - 1)), 0, BitmapHeight - 1);
+
+            int rowStart = Math.Max(0, _lastRenderedRow);
+            if (targetRow >= rowStart)
+            {
                 using (var fb = _bitmap.Lock())
                 {
                     unsafe
                     {
                         uint* ptr = (uint*)fb.Address;
-                        int rowStart = Math.Max(0, _lastRenderedRow);
                         for (int r = rowStart; r <= targetRow; r++)
                         {
-                            if (_rowCount[r] == 0)
-                            {
-                                _rowCount[r] = 1;
-                                for (int c = 0; c < BitmapWidth; c++)
-                                {
-                                    int binIdx = (int)(c * (spectrum.Length / (double)BitmapWidth));
-                                    float db = (float)spectrum[Math.Clamp(binIdx, 0, spectrum.Length - 1)];
-                                    _rowMaxDb[r, c] = db;
-                                    _rowAvgDb[r, c] = db;
-                                    _rowMinDb[r, c] = db;
-                                }
-                            }
-                            else
-                            {
-                                _rowCount[r]++;
-                                for (int c = 0; c < BitmapWidth; c++)
-                                {
-                                    int binIdx = (int)(c * (spectrum.Length / (double)BitmapWidth));
-                                    float db = (float)spectrum[Math.Clamp(binIdx, 0, spectrum.Length - 1)];
-                                    if (db > _rowMaxDb[r, c]) _rowMaxDb[r, c] = db;
-                                    if (db < _rowMinDb[r, c]) _rowMinDb[r, c] = db;
-                                    _rowAvgDb[r, c] += db;
-                                }
-                            }
-
                             uint* rowPtr = ptr + r * BitmapWidth;
-                            int count = Math.Max(1, _rowCount[r]);
+                            int count = r < rowCounts.Length ? rowCounts[r] : 0;
+                            if (count == 0)
+                                continue;
 
+                            int rowOffset = r * BitmapWidth;
                             for (int c = 0; c < BitmapWidth; c++)
                             {
-                                float db = AggregationMode switch
+                                float mag = AggregationMode switch
                                 {
-                                    1 => _rowAvgDb[r, c] / count,
-                                    2 => _rowMinDb[r, c],
-                                    _ => _rowMaxDb[r, c]
+                                    1 => srcAvg[rowOffset + c] / count,
+                                    2 => srcMin[rowOffset + c],
+                                    _ => srcMax[rowOffset + c]
                                 };
-                                int palIdx = Math.Clamp((int)((db + 96.0f) * (255.0f / 96.0f)), 0, 255);
-                                rowPtr[c] = palette[palIdx];
+
+                                double d = 70.4 * Math.Log10(mag * 6000.0 + 1.0);
+                                uint color = ColormapMode switch
+                                {
+                                    0 => PaletteMon[Math.Clamp((int)d, 0, 255)],
+                                    1 => PaletteCol[Math.Clamp((int)(3.5 * d), 0, 895)],
+                                    _ => PaletteBry[Math.Clamp((int)(2.5 * d), 0, 639)]
+                                };
+                                rowPtr[c] = color;
                             }
                         }
                     }
@@ -504,6 +449,13 @@ public sealed class WaterfallControl : Control
         // Draw Waterfall Bitmap
         var destRect = new Rect(leftMargin, 6, plotWidth, plotHeight);
         context.DrawImage(_bitmap, destRect);
+
+        // Subtle 25%, 50%, 75% horizontal grid lines (matching WaterfallControl.java lines 253-260)
+        for (int i = 1; i <= 3; i++)
+        {
+            double yGrid = 6 + plotHeight * (i * 0.25);
+            context.DrawLine(GridPen, new Point(leftMargin, yGrid), new Point(leftMargin + plotWidth, yGrid));
+        }
 
         // Draw Cut-Off Frequency vertical line if enabled (WaterfallControl.java lines 594-598)
         if (ShowCutOffFrequency)

@@ -147,6 +147,18 @@ public partial class MainViewModel : ViewModelBase
     private byte[]? _stereoDensityCloud;
 
     [ObservableProperty]
+    private float[]? _spectrogramMax;
+
+    [ObservableProperty]
+    private float[]? _spectrogramAvg;
+
+    [ObservableProperty]
+    private float[]? _spectrogramMin;
+
+    [ObservableProperty]
+    private int[]? _spectrogramRowCount;
+
+    [ObservableProperty]
     private double _sampleRate = 44100.0;
 
     // DAW Server
@@ -231,6 +243,10 @@ public partial class MainViewModel : ViewModelBase
         PeakHistory = InitializeHistory(-60.0);
         LoudnessHistory = InitializeHistory(-60.0);
         StereoDensityCloud = null;
+        SpectrogramMax = null;
+        SpectrogramAvg = null;
+        SpectrogramMin = null;
+        SpectrogramRowCount = null;
         SModeHistogram = null;
         SModeMaxCount = 0;
         LraLow = -70.0;
@@ -337,6 +353,14 @@ public partial class MainViewModel : ViewModelBase
         GoniometerPointsX = s.GoniometerPointsX;
         GoniometerPointsY = s.GoniometerPointsY;
 
+        if (s.SpectrogramMax != null)
+        {
+            SpectrogramMax = s.SpectrogramMax;
+            SpectrogramAvg = s.SpectrogramAvg;
+            SpectrogramMin = s.SpectrogramMin;
+            SpectrogramRowCount = s.SpectrogramRowCount;
+        }
+
         if (s.PeakHistory != null)
             PeakHistory = s.PeakHistory;
         if (s.LoudnessHistory != null)
@@ -413,6 +437,13 @@ public partial class MainViewModel : ViewModelBase
             PeakHistory = r.PeakHistory;
         if (r.LoudnessHistory != null && r.LoudnessHistory.Length > 0)
             LoudnessHistory = r.LoudnessHistory;
+        if (r.SpectrogramMax != null)
+        {
+            SpectrogramMax = r.SpectrogramMax;
+            SpectrogramAvg = r.SpectrogramAvg;
+            SpectrogramMin = r.SpectrogramMin;
+            SpectrogramRowCount = r.SpectrogramRowCount;
+        }
         StereoDensityCloud = r.Stereo.DensityCloud;
         GoniometerPointsX = null;
         GoniometerPointsY = null;

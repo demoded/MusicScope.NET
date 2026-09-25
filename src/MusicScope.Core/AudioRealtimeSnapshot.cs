@@ -48,6 +48,12 @@ public record AudioRealtimeSnapshot
     public double SModeLraLow { get; init; } = -70.0;
     public double SModeLraHigh { get; init; } = -70.0;
 
+    // 2D Spectrogram buffers (250 rows x 1024 frequency bins)
+    public float[]? SpectrogramMax { get; init; }
+    public float[]? SpectrogramAvg { get; init; }
+    public float[]? SpectrogramMin { get; init; }
+    public int[]? SpectrogramRowCount { get; init; }
+
     // Goniometer vector points for phosphor scope
     public float[]? GoniometerPointsX { get; init; }
     public float[]? GoniometerPointsY { get; init; }

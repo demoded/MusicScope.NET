@@ -38,4 +38,12 @@ public record FullAnalysisReport
     /// Polar loudness history across 512 radial bins.
     /// </summary>
     public double[] LoudnessHistory { get; init; } = [];
+
+    /// <summary>
+    /// Cumulative 2D Spectrogram buffers (250 rows x 1024 frequency bins).
+    /// </summary>
+    public float[]? SpectrogramMax { get; init; }
+    public float[]? SpectrogramAvg { get; init; }
+    public float[]? SpectrogramMin { get; init; }
+    public int[]? SpectrogramRowCount { get; init; }
 }
