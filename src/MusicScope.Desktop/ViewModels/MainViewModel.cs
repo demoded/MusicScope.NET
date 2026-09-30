@@ -35,6 +35,9 @@ public partial class MainViewModel : ViewModelBase
     [ObservableProperty]
     private double _analysisProgress;
 
+    [ObservableProperty]
+    private double? _hoverFrequency;
+
     // MusicScope Format Matrix
     [ObservableProperty]
     private string _formatName = "FLAC";

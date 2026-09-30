@@ -17,7 +17,7 @@ namespace MusicScope.Desktop.Controls;
 ///  - BRY / MON / COL: switches heatmap colormap (Bright Red-Yellow / Monochrome Green / Rainbow Color)
 ///  - COF: toggles Cut-Off Frequency line overlay
 /// </summary>
-public sealed class WaterfallControl : Control
+public sealed class WaterfallControl : FrequencyChartControl
 {
     public static readonly StyledProperty<double[]?> LatestSpectrumProperty =
         AvaloniaProperty.Register<WaterfallControl, double[]?>(nameof(LatestSpectrum));
@@ -36,9 +36,6 @@ public sealed class WaterfallControl : Control
 
     public static readonly StyledProperty<double> TrackProgressProperty =
         AvaloniaProperty.Register<WaterfallControl, double>(nameof(TrackProgress), 0.0);
-
-    public static readonly StyledProperty<double> SampleRateProperty =
-        AvaloniaProperty.Register<WaterfallControl, double>(nameof(SampleRate), 44100.0);
 
     public static readonly StyledProperty<double> CutoffFrequencyHzProperty =
         AvaloniaProperty.Register<WaterfallControl, double>(nameof(CutoffFrequencyHz), 0.0);
@@ -88,10 +85,23 @@ public sealed class WaterfallControl : Control
         set => SetValue(TrackProgressProperty, value);
     }
 
-    public double SampleRate
+    protected override Rect PlotBounds => new(38, 6, Math.Max(0, Bounds.Width - 48), Math.Max(0, Bounds.Height - 10));
+
+    protected override (double? LevelDb, double? CursorDb, string LevelName) GetLevels(Point position)
     {
-        get => GetValue(SampleRateProperty);
-        set => SetValue(SampleRateProperty, value);
+        Rect plot = PlotBounds;
+        int column = Math.Clamp((int)((position.X - plot.X) / plot.Width * BitmapWidth), 0, BitmapWidth - 1);
+        int row = Math.Clamp((int)((position.Y - plot.Y) / plot.Height * BitmapHeight), 0, BitmapHeight - 1);
+        string name = AggregationMode switch { 1 => "AVG", 2 => "MIN", _ => "MAX" };
+        int count = SpectrogramRowCount is { } counts && row < counts.Length ? counts[row] : 0;
+        float[]? values = AggregationMode switch { 1 => SpectrogramAvg, 2 => SpectrogramMin, _ => SpectrogramMax };
+        int index = row * BitmapWidth + column;
+        if (count <= 0 || values == null || index >= values.Length) return (null, null, name);
+
+        double magnitude = values[index];
+        if (!double.IsFinite(magnitude) || magnitude < 0) return (null, null, name);
+        if (AggregationMode == 1) magnitude /= count;
+        return (magnitude > 0 ? 20 * Math.Log10(magnitude) : double.NegativeInfinity, null, name);
     }
 
     public double CutoffFrequencyHz
@@ -348,15 +358,16 @@ public sealed class WaterfallControl : Control
     {
         double width = Bounds.Width;
         double height = Bounds.Height;
-        if (width < 30 || height < 30) return;
+        if (PlotBounds.Width <= 0 || PlotBounds.Height <= 0) return;
 
         var tf = Typeface.Default;
         context.FillRectangle(BgBrush, new Rect(0, 0, width, height));
 
-        double leftMargin = 38.0;
+        Rect plot = PlotBounds;
+        double leftMargin = plot.Left;
         _leftMargin = leftMargin;
-        double plotWidth = width - leftMargin - 10.0;
-        double plotHeight = height - 10.0;
+        double plotWidth = plot.Width;
+        double plotHeight = plot.Height;
 
         // Reset if new analysis starts
         if (TrackProgress <= 0.001 && _lastRenderedRow > 10)
@@ -447,8 +458,7 @@ public sealed class WaterfallControl : Control
         DrawTextRight(context, "100", tf, 9, AxisTextBrush, leftMargin - 4, y100);
 
         // Draw Waterfall Bitmap
-        var destRect = new Rect(leftMargin, 6, plotWidth, plotHeight);
-        context.DrawImage(_bitmap, destRect);
+        context.DrawImage(_bitmap, plot);
 
         // Subtle 25%, 50%, 75% horizontal grid lines (matching WaterfallControl.java lines 253-260)
         for (int i = 1; i <= 3; i++)
@@ -461,12 +471,13 @@ public sealed class WaterfallControl : Control
         if (ShowCutOffFrequency)
         {
             double cutoffHz = CutoffFrequencyHz > 0 ? CutoffFrequencyHz : (SampleRate > 0 ? Math.Min(22050.0, SampleRate * 0.45) : 20000.0);
-            double nyquistHz = SampleRate > 0 ? SampleRate / 2.0 : 22050.0;
+            double nyquistHz = EffectiveSampleRate / 2.0;
             double cofNorm = Math.Clamp(cutoffHz / nyquistHz, 0.0, 1.0);
             double cofX = leftMargin + cofNorm * plotWidth;
 
             context.DrawLine(RedCutoffPen, new Point(cofX, 6), new Point(cofX, 6 + plotHeight));
         }
+        DrawHover(context);
     }
 
     private static void DrawText(DrawingContext ctx, string text, Typeface tf, double size, IBrush brush, double x, double y)

@@ -8,5 +8,6 @@
   </Folder>
   <Folder Name="/tests/">
     <Project Path="tests/MusicScope.Core.Tests/MusicScope.Core.Tests.csproj" />
+    <Project Path="tests/MusicScope.Desktop.Tests/MusicScope.Desktop.Tests.csproj" />
   </Folder>
 </Solution>

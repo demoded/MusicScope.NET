@@ -9,6 +9,7 @@
 
   <ItemGroup>
     <Folder Include="Models\" />
+    <InternalsVisibleTo Include="MusicScope.Desktop.Tests" />
     <AvaloniaResource Include="Assets\**" />
   </ItemGroup>
 
