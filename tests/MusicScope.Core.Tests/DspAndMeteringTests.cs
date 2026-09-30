@@ -296,8 +296,8 @@ public class DspAndMeteringTests
     public void TruePeakMeter_Calculates_Running_Crest_Factor_Matching_MusicScope()
     {
         var meter = new TruePeakMeter(channelCount: 2);
-        // Feed 16 blocks (16 * 2048 = 32768 frames) of a pure 1 kHz stereo sine wave at 0 dBFS
-        int frameCount = 32768;
+        // Feed 16 blocks of 50 ms (2205 frames at 44.1 kHz) of a pure 1 kHz stereo sine wave at 0 dBFS.
+        int frameCount = 16 * 2205;
         double[] stereo = new double[frameCount * 2];
         for (int i = 0; i < frameCount; i++)
         {
