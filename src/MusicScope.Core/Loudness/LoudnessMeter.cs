@@ -46,7 +46,8 @@ public sealed class LoudnessMeter
     private int _sModeMaxCount;
 
     // PLR (Peak-to-Loudness Ratio) matching XiVideo MusicScope LoudnessModule
-    private const int PlrBlockSize = 2048;
+    // Eight 50 ms blocks form the original application's 400 ms PLR smoothing window.
+    private readonly int _plrBlockSize;
     private int _plrBlockSampleCount;
     private double _plrBlockMaxPeak;
     private double _plrBlockEnergySum;
@@ -69,13 +70,14 @@ public sealed class LoudnessMeter
 
     public LoudnessMeter(double sampleRate, int channelCount = 2, double[]? channelWeights = null)
     {
-        if (sampleRate <= 0)
+        if (!double.IsFinite(sampleRate) || sampleRate <= 0)
             throw new ArgumentOutOfRangeException(nameof(sampleRate));
         if (channelCount <= 0)
             throw new ArgumentOutOfRangeException(nameof(channelCount));
 
         _sampleRate = sampleRate;
         _channelCount = channelCount;
+        _plrBlockSize = checked((int)Math.Ceiling(sampleRate / 20.0));
         _filter = new KWeightingFilter(sampleRate, channelCount);
 
         _samplesPerBlock400ms = (int)Math.Round(0.400 * sampleRate);
@@ -131,7 +133,7 @@ public sealed class LoudnessMeter
                 if (absR > _plrBlockMaxPeak) _plrBlockMaxPeak = absR;
                 _plrBlockEnergySum += (filteredL * filteredL + filteredR * filteredR);
                 _plrBlockSampleCount++;
-                if (_plrBlockSampleCount >= PlrBlockSize)
+                if (_plrBlockSampleCount >= _plrBlockSize)
                 {
                     EvaluatePlrBlock();
                 }
@@ -175,7 +177,7 @@ public sealed class LoudnessMeter
                 }
                 _plrBlockEnergySum += frameEnergySum;
                 _plrBlockSampleCount++;
-                if (_plrBlockSampleCount >= PlrBlockSize)
+                if (_plrBlockSampleCount >= _plrBlockSize)
                 {
                     EvaluatePlrBlock();
                 }
@@ -225,7 +227,7 @@ public sealed class LoudnessMeter
                 if (absR > _plrBlockMaxPeak) _plrBlockMaxPeak = absR;
                 _plrBlockEnergySum += (filteredL * filteredL + filteredR * filteredR);
                 _plrBlockSampleCount++;
-                if (_plrBlockSampleCount >= PlrBlockSize)
+                if (_plrBlockSampleCount >= _plrBlockSize)
                 {
                     EvaluatePlrBlock();
                 }
@@ -269,7 +271,7 @@ public sealed class LoudnessMeter
                 }
                 _plrBlockEnergySum += frameEnergySum;
                 _plrBlockSampleCount++;
-                if (_plrBlockSampleCount >= PlrBlockSize)
+                if (_plrBlockSampleCount >= _plrBlockSize)
                 {
                     EvaluatePlrBlock();
                 }
@@ -369,7 +371,7 @@ public sealed class LoudnessMeter
     private void EvaluatePlrBlock()
     {
         double d2 = _plrBlockMaxPeak;
-        double d9 = _plrBlockEnergySum / PlrBlockSize;
+        double d9 = _plrBlockEnergySum / _plrBlockSampleCount;
         _plrBlockSampleCount = 0;
         _plrBlockMaxPeak = 0.0;
         _plrBlockEnergySum = 0.0;
@@ -420,6 +422,10 @@ public sealed class LoudnessMeter
     /// </summary>
     public LoudnessResult CalculateResult()
     {
+        // The Java decoder submits the final short block with its actual sample count.
+        if (_plrBlockSampleCount > 0)
+            EvaluatePlrBlock();
+
         if (_blockPowers400ms.Count == 0)
         {
             return new LoudnessResult();

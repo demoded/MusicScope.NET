@@ -11,13 +11,15 @@ This test suite contains 6 reference WAV audio files created with mathematically
 | **01** | `01_Sine_1kHz_0dBFS_44k_16bit.wav` | 44.1 kHz / 16-bit | 0.0 dBFS | -3.0 dBFS | **3.0 dB** | 0.0 dBFS | 0.0 dBFS | -3.0 dBFS | **3.0 dB** | _(verify)_ |
 | **02** | `02_ToneBurst_Crest_6dB_44k_16bit.wav` | 44.1 kHz / 16-bit | 0.0 dBFS | -6.0 dBFS | **6.0 dB** | 0.0 dBFS | 0.0 dBFS | -6.0 dBFS | **6.0 dB** | _(verify)_ |
 | **03** | `03_PulsedTone_Crest_10dB_44k_16bit.wav` | 44.1 kHz / 16-bit | 0.0 dBFS | -10.0 dBFS | **10.0 dB** | 0.0 dBFS | +1.0 dBFS | -10.0 dBFS | **11.0 dB\*** | _(verify)_ |
-| **04** | `04_MusicalSim_Crest_11.1dB_44k_16bit.wav`| 44.1 kHz / 16-bit | 0.0 dBFS | -11.1 dBFS | **11.1 dB** | 0.0 dBFS | +0.4 dBFS | -11.1 dBFS | **11.2 dB\*** | _(verify)_ |
-| **05** | `05_HighDynamics_Crest_14dB_44k_16bit.wav`| 44.1 kHz / 16-bit | 0.0 dBFS | -14.0 dBFS | **14.0 dB** | 0.0 dBFS | 0.0 dBFS | -14.0 dBFS | **14.0 dB** | _(verify)_ |
+| **04** | `04_MusicalSim_Crest_11.1dB_44k_16bit.wav`| 44.1 kHz / 16-bit | 0.0 dBFS | -11.1 dBFS | **11.1 dB** | 0.0 dBFS | +0.4 dBFS | -11.1 dBFS | **11.1 dB** | _(verify)_ |
+| **05** | `05_HighDynamics_Crest_14dB_44k_16bit.wav`| 44.1 kHz / 16-bit | 0.0 dBFS | -14.0 dBFS | **14.0 dB** | 0.0 dBFS | 0.0 dBFS | -14.0 dBFS | **13.9 dB** | **13.9 dB (user-reported)** |
 | **06** | `06_MusicalSim_Crest_11.1dB_96k_24bit.wav`| 96.0 kHz / 24-bit | 0.0 dBFS | -11.1 dBFS | **11.1 dB** | 0.0 dBFS | 0.0 dBFS | -11.1 dBFS | **11.1 dB** | _(verify)_ |
 | **07** | `07_Sweep_10kHz_22.5kHz_-60dBFS_48k_24bit.wav`| 48.0 kHz / 24-bit | -60.0 dBFS | -63.0 dBFS | **3.0 dB** | -60.0 dBFS | -60.0 dBFS | -63.8 dBFS | **3.1 dB** | _(verify)_ |
 | **07b** | `07_Sweep_10kHz_22.5kHz_-60dBFS_48k_16bit.wav`| 48.0 kHz / 16-bit | -60.0 dBFS | -63.0 dBFS | **3.0 dB** | -60.2 dBFS | -59.9 dBFS | -63.9 dBFS | **3.3 dB** | _(verify)_ |
 
 \* _Note on Inter-Sample Overshoot:_ In MusicScope's algorithm, CREST is computed from the **oversampled True Peak** rather than the discrete sample peak. Files with sharp transients that induce polyphase filter overshoot (e.g. +1.0 dB on pulsed tones or +0.4 dB on 44.1 kHz percussion) yield a correspondingly higher CREST factor ($1.0 - (-10.0) = 11.0\text{ dB}$).
+
+File 05 is covered by a regression test: MusicScope.NET displays **CREST 13.9 dB** and **PLR 10.0 dB**, matching the user-reported original application values. The filename's 14.0 dB target describes the generated signal's overall peak-to-RMS ratio; the application's CREST average uses the block averaging described below.
 
 ---
 
@@ -86,7 +88,7 @@ This test suite contains 6 reference WAV audio files created with mathematically
 Reverse-engineered from original `LevelsModule.java` (lines 268–288):
 
 1. **Block Processing**:
-   Audio is divided into 2048-sample blocks ($N = 2048$).
+   Audio is divided into 50 ms blocks, rounded up to whole sample frames: 2,205 frames at 44.1 kHz, 2,400 at 48 kHz, and 4,800 at 96 kHz. This matches the original file decoder's `DSP(50)` calls. The final partial block uses its actual frame count for RMS and PLR energy averaging.
    At 44.1 kHz, samples pass through a 4x oversampling cascaded FIR polyphase filter (Filter 0 with 90 taps followed by Filter 1 with 54 taps).
 
 2. **Block Crest Ratio**:
@@ -101,7 +103,7 @@ Reverse-engineered from original `LevelsModule.java` (lines 268–288):
    $$d19 = \frac{1}{8} \sum_{k=0}^{7} \text{RingBuffer}[k]$$
 
 4. **Warmup & Long-Term Accumulator**:
-   - The first 8 blocks ($\approx 0.37$ seconds) are warmup blocks to let the ring buffer fill up and are skipped.
+   - The first 8 blocks ($\approx 0.4$ seconds) are warmup blocks to let the ring buffer fill up and are skipped.
    - For all subsequent blocks where $d19 > 0.001$:
      $$\text{ChunkInfo} += d19$$
      $$\text{CREST Avg (dB)} = 20 \log_{10}\left(\frac{\text{ChunkInfo}}{\text{BlockCount}}\right)$$
