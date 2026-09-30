@@ -11,16 +11,13 @@ namespace MusicScope.Desktop.Controls;
 /// Displays dB scale (0, -6, -12, -24, -40, -60, -96), cumulative peak hold curve (#FFBF00),
 /// live instantaneous green level bars, bright green baseline, Nyquist ticks, and switch buttons.
 /// </summary>
-public sealed class SpectrumGraphControl : Control
+public sealed class SpectrumGraphControl : FrequencyChartControl
 {
     public static readonly StyledProperty<double[]?> MagnitudesDbProperty =
         AvaloniaProperty.Register<SpectrumGraphControl, double[]?>(nameof(MagnitudesDb));
 
     public static readonly StyledProperty<double[]?> InstantMagnitudesDbProperty =
         AvaloniaProperty.Register<SpectrumGraphControl, double[]?>(nameof(InstantMagnitudesDb));
-
-    public static readonly StyledProperty<double> SampleRateProperty =
-        AvaloniaProperty.Register<SpectrumGraphControl, double>(nameof(SampleRate), 44100.0);
 
     public double[]? MagnitudesDb
     {
@@ -34,10 +31,24 @@ public sealed class SpectrumGraphControl : Control
         set => SetValue(InstantMagnitudesDbProperty, value);
     }
 
-    public double SampleRate
+    protected override Rect PlotBounds => new(38, 16, Math.Max(0, Bounds.Width - 48), Math.Max(0, Bounds.Height - 36));
+
+    protected override (double? LevelDb, double? CursorDb, string LevelName) GetLevels(Point position)
     {
-        get => GetValue(SampleRateProperty);
-        set => SetValue(SampleRateProperty, value);
+        Rect plot = PlotBounds;
+        double fraction = Math.Clamp((position.X - plot.X) / plot.Width, 0, 1);
+        double? peak = null;
+        if (MagnitudesDb is { Length: >= 4 } magnitudes)
+        {
+            int bin = (int)Math.Round(fraction * (magnitudes.Length - 1));
+            peak = magnitudes[bin];
+        }
+
+        // Inverse of DbToY: the pointer's axis level is distinct from the curve's peak level.
+        double t = Math.Clamp((plot.Bottom - position.Y) / plot.Height, 0, 1);
+        double amplitude = (Math.Pow(3001.0, t) - 1.0) / 3000.0;
+        double cursorDb = amplitude > 0 ? Math.Clamp(20 * Math.Log10(amplitude), -96, 0) : -96;
+        return (peak, cursorDb, "Peak");
     }
 
     private static readonly IBrush BgBrush = new SolidColorBrush(Color.FromRgb(0, 0, 0)); // Pure black
@@ -59,16 +70,17 @@ public sealed class SpectrumGraphControl : Control
     {
         double width = Bounds.Width;
         double height = Bounds.Height;
-        if (width < 30 || height < 30) return;
+        if (PlotBounds.Width <= 0 || PlotBounds.Height <= 0) return;
 
         var tf = Typeface.Default;
         context.FillRectangle(BgBrush, new Rect(0, 0, width, height));
 
-        double topY = 16.0;
-        double bottomAxisY = height - 20.0;
-        double plotHeight = bottomAxisY - topY;
-        double leftMargin = 38.0;
-        double plotWidth = width - leftMargin - 10.0;
+        Rect plot = PlotBounds;
+        double topY = plot.Top;
+        double bottomAxisY = plot.Bottom;
+        double plotHeight = plot.Height;
+        double leftMargin = plot.Left;
+        double plotWidth = plot.Width;
 
         // dB scale levels: 0, -6, -12, -24, -40, -60, -96
         double[] dbMarks = [0.0, -6.0, -12.0, -24.0, -40.0, -60.0, -96.0];
@@ -100,7 +112,7 @@ public sealed class SpectrumGraphControl : Control
         context.DrawLine(GreenBaselinePen, new Point(leftMargin, bottomAxisY), new Point(leftMargin + plotWidth, bottomAxisY));
 
         // Frequency Ticks: fs/8, fs/4, 3fs/8, fs/2 (Nyquist)
-        double nyquistKhz = (SampleRate > 0 ? SampleRate : 44100.0) / 2000.0;
+        double nyquistKhz = EffectiveSampleRate / 2000.0;
         double f1 = nyquistKhz * 0.25;
         double f2 = nyquistKhz * 0.50;
         double f3 = nyquistKhz * 0.75;
@@ -133,7 +145,7 @@ public sealed class SpectrumGraphControl : Control
 
         // 1. Draw Instantaneous Green Spectrum bars (if available during live playback)
         double[]? instant = InstantMagnitudesDb;
-        if (instant != null && instant.Length > 0)
+        if (instant != null && instant.Length > 1)
         {
             int instBins = instant.Length;
             for (int i = 0; i < instBins; i++)
@@ -150,7 +162,11 @@ public sealed class SpectrumGraphControl : Control
 
         // 2. Draw Cumulative Peak Hold Curve in iconic Amber (#FFBF00)
         double[]? mags = MagnitudesDb;
-        if (mags == null || mags.Length < 4) return;
+        if (mags == null || mags.Length < 4)
+        {
+            DrawHover(context);
+            return;
+        }
 
         int binCount = mags.Length;
         Point? prevPt = null;
@@ -168,6 +184,7 @@ public sealed class SpectrumGraphControl : Control
             }
             prevPt = pt;
         }
+        DrawHover(context);
     }
 
     private static void DrawText(DrawingContext ctx, string text, Typeface tf, double size, IBrush brush, double x, double y)
