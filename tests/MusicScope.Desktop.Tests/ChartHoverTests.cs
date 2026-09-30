@@ -25,6 +25,107 @@ public static class TestAppBuilder
 public class ChartHoverTests
 {
     [AvaloniaTheory]
+    [InlineData(16, 181)]
+    [InlineData(24, 121)]
+    public void Spectrum_RendersCurveAndQuietLiveBarsUsingSelectedScale(int bitDepth, int curveY)
+    {
+        var chart = new SpectrumGraphControl
+        {
+            BitDepth = bitDepth,
+            MagnitudesDb = [-60, -60, -60, -60],
+            InstantMagnitudesDb = [-100, -100, -100, -100]
+        };
+        var window = new Window { Width = 548, Height = 236, Content = chart };
+        window.Show();
+        try
+        {
+            using var frame = window.CaptureRenderedFrame();
+            Assert.NotNull(frame);
+            using var buffer = frame.Lock();
+            Assert.True(buffer.Format == Avalonia.Platform.PixelFormat.Bgra8888 ||
+                buffer.Format == Avalonia.Platform.PixelFormat.Rgba8888);
+            var pixels = new byte[buffer.RowBytes * buffer.Size.Height];
+            Marshal.Copy(buffer.Address, pixels, 0, pixels.Length);
+            (byte Red, byte Green, byte Blue) Pixel(int x, int y)
+            {
+                int offset = y * buffer.RowBytes + x * 4;
+                return buffer.Format == Avalonia.Platform.PixelFormat.Bgra8888
+                    ? (pixels[offset + 2], pixels[offset + 1], pixels[offset])
+                    : (pixels[offset], pixels[offset + 1], pixels[offset + 2]);
+            }
+
+            // At -60 dB the legacy scale puts the curve near y=181 (16-bit) or y=121 (24-bit).
+            Assert.Contains(Enumerable.Range(curveY - 1, 4), y =>
+            {
+                var pixel = Pixel(280, y);
+                return pixel.Red > 100 && pixel.Green > 60 && pixel.Blue < 20;
+            });
+            // A -100 dB live bar is visible above the baseline only on the 144 dB scale.
+            bool quietBarVisible = Enumerable.Range(203, 4).Any(x =>
+            {
+                var pixel = Pixel(x, 200);
+                return pixel.Green > 30 && pixel.Red < 10 && pixel.Blue < 60;
+            });
+            Assert.Equal(bitDepth == 24, quietBarVisible);
+        }
+        finally { window.Close(); }
+    }
+
+    [AvaloniaTheory]
+    [InlineData(44100, 16, -96, -34.9)]
+    [InlineData(96000, 16, -96, -34.9)]
+    [InlineData(44100, 24, -144, -57.0)]
+    [InlineData(96000, 24, -144, -57.0)]
+    [InlineData(48000, 32, -144, -57.0)]
+    public void Spectrum_XamlSelectsScaleByBitDepth(double sampleRate, int bitDepth, double floor, double midpoint)
+    {
+        var vm = new MainViewModel { SampleRate = sampleRate, BitDepth = bitDepth };
+        var window = new MainWindow { DataContext = vm };
+        window.Show();
+        try
+        {
+            var chart = window.GetVisualDescendants().OfType<SpectrumGraphControl>().Single();
+            double x = 38 + (chart.Bounds.Width - 48) / 2;
+            double bottom = chart.Bounds.Height - 20;
+            window.MouseMove(chart.TranslatePoint(new Point(x, bottom), window)!.Value);
+            Assert.Equal(floor, chart.GetHoverReadout()!.Value.CursorDb);
+            window.MouseMove(chart.TranslatePoint(new Point(x, (16 + bottom) / 2), window)!.Value);
+            Assert.Equal(midpoint, chart.GetHoverReadout()!.Value.CursorDb!.Value, 1);
+        }
+        finally { window.Close(); }
+    }
+
+    [AvaloniaFact]
+    public void Spectrum_BitDepthChangeRedrawsCurveAndGrid_AndUpdatesStationaryCursor()
+    {
+        var vm = new MainViewModel
+        {
+            SampleRate = 48000, BitDepth = 16,
+            SpectrumMagnitudes = [-60, -60, -60, -60],
+            InstantSpectrumMagnitudes = [-100, -100, -100, -100]
+        };
+        var window = new MainWindow { DataContext = vm };
+        window.Show();
+        try
+        {
+            var chart = window.GetVisualDescendants().OfType<SpectrumGraphControl>().Single();
+            var point = new Point(38 + (chart.Bounds.Width - 48) / 2, (16 + chart.Bounds.Height - 20) / 2);
+            window.MouseMove(chart.TranslatePoint(point, window)!.Value);
+            var before = Capture(window);
+            Assert.Equal(-34.9, chart.GetHoverReadout()!.Value.CursorDb!.Value, 1);
+            vm.BitDepth = 24;
+            Dispatcher.UIThread.RunJobs();
+            Assert.Equal(-57.0, chart.GetHoverReadout()!.Value.CursorDb!.Value, 1);
+            Assert.False(before.SequenceEqual(Capture(window)));
+            vm.BitDepth = 16;
+            Dispatcher.UIThread.RunJobs();
+            Assert.Equal(-34.9, chart.GetHoverReadout()!.Value.CursorDb!.Value, 1);
+            Assert.Equal(before, Capture(window));
+        }
+        finally { window.Close(); }
+    }
+
+    [AvaloniaTheory]
     [InlineData(false)]
     [InlineData(true)]
     public void Hover_DrawsOverlay_AndLeavingPlotRemovesIt_EvenWithoutAudio(bool waterfall)

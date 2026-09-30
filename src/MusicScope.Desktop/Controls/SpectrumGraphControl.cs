@@ -8,11 +8,26 @@ namespace MusicScope.Desktop.Controls;
 
 /// <summary>
 /// Linear Frequency Spectrum Control directly modeling the middle row of the MusicScope UI.
-/// Displays dB scale (0, -6, -12, -24, -40, -60, -96), cumulative peak hold curve (#FFBF00),
+/// Displays a bit-depth-dependent dB scale (down to -96 or -144), cumulative peak hold curve (#FFBF00),
 /// live instantaneous green level bars, bright green baseline, Nyquist ticks, and switch buttons.
 /// </summary>
 public sealed class SpectrumGraphControl : FrequencyChartControl
 {
+    public static readonly StyledProperty<int> BitDepthProperty =
+        AvaloniaProperty.Register<SpectrumGraphControl, int>(nameof(BitDepth), 16);
+
+    public int BitDepth
+    {
+        get => GetValue(BitDepthProperty);
+        set => SetValue(BitDepthProperty, value);
+    }
+
+    // SpectrumControl.java selects the 96 dB scale only for 16-bit input.
+    private double MinimumDb => BitDepth == 16 ? -96.0 : -144.0;
+    private double AmplitudeScale => BitDepth == 16 ? 3000.0 : 500000.0;
+    private static readonly double[] DbMarks16Bit = [0, -6, -12, -24, -40, -60, -96];
+    private static readonly double[] DbMarksOther = [0, -12, -24, -40, -60, -100, -144];
+
     public static readonly StyledProperty<double[]?> MagnitudesDbProperty =
         AvaloniaProperty.Register<SpectrumGraphControl, double[]?>(nameof(MagnitudesDb));
 
@@ -46,8 +61,9 @@ public sealed class SpectrumGraphControl : FrequencyChartControl
 
         // Inverse of DbToY: the pointer's axis level is distinct from the curve's peak level.
         double t = Math.Clamp((plot.Bottom - position.Y) / plot.Height, 0, 1);
-        double amplitude = (Math.Pow(3001.0, t) - 1.0) / 3000.0;
-        double cursorDb = amplitude > 0 ? Math.Clamp(20 * Math.Log10(amplitude), -96, 0) : -96;
+        double scale = AmplitudeScale;
+        double amplitude = (Math.Pow(scale + 1.0, t) - 1.0) / scale;
+        double cursorDb = amplitude > 0 ? Math.Clamp(20 * Math.Log10(amplitude), MinimumDb, 0) : MinimumDb;
         return (peak, cursorDb, "Peak");
     }
 
@@ -63,7 +79,7 @@ public sealed class SpectrumGraphControl : FrequencyChartControl
 
     static SpectrumGraphControl()
     {
-        AffectsRender<SpectrumGraphControl>(MagnitudesDbProperty, InstantMagnitudesDbProperty, SampleRateProperty);
+        AffectsRender<SpectrumGraphControl>(MagnitudesDbProperty, InstantMagnitudesDbProperty, SampleRateProperty, BitDepthProperty);
     }
 
     public override void Render(DrawingContext context)
@@ -82,16 +98,17 @@ public sealed class SpectrumGraphControl : FrequencyChartControl
         double leftMargin = plot.Left;
         double plotWidth = plot.Width;
 
-        // dB scale levels: 0, -6, -12, -24, -40, -60, -96
-        double[] dbMarks = [0.0, -6.0, -12.0, -24.0, -40.0, -60.0, -96.0];
+        double[] dbMarks = BitDepth == 16 ? DbMarks16Bit : DbMarksOther;
+        double minimumDb = MinimumDb;
+        double scale = AmplitudeScale;
 
         double DbToY(double db)
         {
-            // Exact formula from MusicScope SpectrumControl.java:
-            // y = 250 - BufferedAlacReader * log10(d * AlacMetaDataModel + 1.0)
-            double clamped = Math.Clamp(db, -96.0, 0.0);
+            // MusicScope SpectrumControl.java's nonlinear amplitude mapping,
+            // normalized to this control's plot height for the selected bit depth.
+            double clamped = Math.Clamp(db, minimumDb, 0.0);
             double d = Math.Pow(10.0, clamped / 20.0);
-            double norm = Math.Log10(d * 3000.0 + 1.0) / Math.Log10(3001.0);
+            double norm = Math.Log10(d * scale + 1.0) / Math.Log10(scale + 1.0);
             return bottomAxisY - norm * plotHeight;
         }
 
@@ -152,7 +169,7 @@ public sealed class SpectrumGraphControl : FrequencyChartControl
             {
                 double x = leftMargin + (i / (double)(instBins - 1)) * plotWidth;
                 double valDb = instant[i];
-                if (valDb > -96.0)
+                if (valDb > minimumDb)
                 {
                     double y = DbToY(valDb);
                     context.DrawLine(InstantGreenPen, new Point(x, bottomAxisY), new Point(x, y));
