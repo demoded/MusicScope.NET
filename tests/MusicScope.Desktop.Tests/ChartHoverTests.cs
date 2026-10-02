@@ -158,10 +158,10 @@ public class ChartHoverTests
 
     [AvaloniaTheory]
     [InlineData(38, 16, 48000, 0, -10, 0)]
-    [InlineData(288, 116, 48000, 12000, -30, -34.9)]
-    [InlineData(538, 216, 48000, 24000, -50, -96)]
-    [InlineData(288, 116, 44100, 11025, -30, -34.9)]
-    [InlineData(288, 116, 96000, 24000, -30, -34.9)]
+    [InlineData(288, 108, 48000, 12000, -30, -34.9)]
+    [InlineData(538, 200, 48000, 24000, -50, -96)]
+    [InlineData(288, 108, 44100, 11025, -30, -34.9)]
+    [InlineData(288, 108, 96000, 24000, -30, -34.9)]
     public void Spectrum_ReadsFrequencyAndCurve_SeparatelyFromNonlinearCursorAxis(
         double x, double y, double sampleRate, double frequency, double level, double cursor)
     {

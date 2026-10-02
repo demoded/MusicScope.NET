@@ -134,6 +134,8 @@
                     <!-- Row 1: Linear Frequency Spectrum [kHz] -->
                     <Border Grid.Row="1" BorderBrush="#1C2127" BorderThickness="0,0,0,1" Background="#000000">
                         <ctrl:SpectrumGraphControl MagnitudesDb="{Binding SpectrumMagnitudes}"
+                                                   LinearSpectrum="{Binding LinearSpectrum}"
+                                                   LogSpectrum="{Binding LogSpectrum}"
                                                    BitDepth="{Binding BitDepth}"
                                                    HoverFrequency="{Binding HoverFrequency, Mode=TwoWay}"
                                                    InstantMagnitudesDb="{Binding InstantSpectrumMagnitudes}"

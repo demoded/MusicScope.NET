@@ -41,6 +41,8 @@ public record AudioRealtimeSnapshot
     // Spectrum curves
     public double[]? InstantSpectrumDb { get; init; }
     public double[]? CumulativePeakSpectrumDb { get; init; }
+    public DSP.SpectrumFrame? LinearSpectrum { get; init; }
+    public DSP.SpectrumFrame? LogSpectrum { get; init; }
 
     // Polar history dial (512 radial bins)
     public double[]? PeakHistory { get; init; }
