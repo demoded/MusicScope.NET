@@ -24,8 +24,13 @@ if ($RuntimeIdentifier.StartsWith('osx-')) {
 # Publish directly into the app bundle on macOS so distribution folders contain one copy.
 & dotnet publish (Join-Path $desktopProject 'MusicScope.Desktop.csproj') `
     -r $RuntimeIdentifier -c Release --self-contained true `
-    -p:PublishSingleFile=true "-p:Version=$Version" -o $publishPath
+    -p:PublishSingleFile=true -p:IncludeNativeLibrariesForSelfExtract=true `
+    -p:DebugType=embedded -p:CopyOutputSymbolsToPublishDirectory=false `
+    "-p:Version=$Version" -o $publishPath
 if ($LASTEXITCODE -ne 0) { throw "Publishing $RuntimeIdentifier failed." }
+
+# Native packages can ship their own PDBs even when managed symbols are embedded.
+Get-ChildItem -LiteralPath $publishPath -Filter *.pdb -File -Recurse | Remove-Item -Force
 
 if ($RuntimeIdentifier.StartsWith('osx-')) {
     $resources = Join-Path $bundleContents 'Resources'
