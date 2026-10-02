@@ -10,7 +10,8 @@ namespace MusicScope.Core.Levels;
 /// </summary>
 public sealed class TruePeakMeter
 {
-    private const int BlockSize = 2048;
+    // The original file-analysis pipeline supplies 50 ms blocks at the input sample rate.
+    private readonly int _blockSize;
 
     private readonly int _channelCount;
     private readonly double _sampleRate;
@@ -22,10 +23,10 @@ public sealed class TruePeakMeter
     private readonly MusicScopePolyphaseFilter _filter3 = new(3); // 48k stage 2 / 96k (52 taps)
 
     // Block buffers
-    private readonly double[] _inBlockL = new double[BlockSize];
-    private readonly double[] _inBlockR = new double[BlockSize];
-    private readonly double[] _stage1L = new double[BlockSize * 2];
-    private readonly double[] _stage1R = new double[BlockSize * 2];
+    private readonly double[] _inBlockL;
+    private readonly double[] _inBlockR;
+    private readonly double[] _stage1L;
+    private readonly double[] _stage1R;
     private int _inBlockPos;
 
     // Peaks and RMS
@@ -61,11 +62,18 @@ public sealed class TruePeakMeter
 
     public TruePeakMeter(int channelCount = 2, double sampleRate = 44100.0)
     {
+        if (!double.IsFinite(sampleRate) || sampleRate <= 0)
+            throw new ArgumentOutOfRangeException(nameof(sampleRate));
         if (channelCount <= 0)
             throw new ArgumentOutOfRangeException(nameof(channelCount));
 
         _channelCount = channelCount;
         _sampleRate = sampleRate;
+        _blockSize = checked((int)Math.Ceiling(sampleRate / 20.0));
+        _inBlockL = new double[_blockSize];
+        _inBlockR = new double[_blockSize];
+        _stage1L = new double[checked(_blockSize * 2)];
+        _stage1R = new double[checked(_blockSize * 2)];
 
         Reset();
     }
@@ -86,7 +94,7 @@ public sealed class TruePeakMeter
 
             while (frameOffset < totalFrames)
             {
-                int framesToCopy = Math.Min(totalFrames - frameOffset, BlockSize - _inBlockPos);
+                int framesToCopy = Math.Min(totalFrames - frameOffset, _blockSize - _inBlockPos);
                 int baseSampleIdx = frameOffset << 1;
 
                 for (int i = 0; i < framesToCopy; i++)
@@ -107,9 +115,9 @@ public sealed class TruePeakMeter
                 _inBlockPos += framesToCopy;
                 frameOffset += framesToCopy;
 
-                if (_inBlockPos == BlockSize)
+                if (_inBlockPos == _blockSize)
                 {
-                    ProcessBlock(BlockSize);
+                    ProcessBlock(_blockSize);
                     _inBlockPos = 0;
                 }
             }
@@ -123,7 +131,7 @@ public sealed class TruePeakMeter
 
             while (frameOffset < totalFrames)
             {
-                int framesToCopy = Math.Min(totalFrames - frameOffset, BlockSize - _inBlockPos);
+                int framesToCopy = Math.Min(totalFrames - frameOffset, _blockSize - _inBlockPos);
                 int baseSampleIdx = frameOffset * _channelCount;
 
                 for (int i = 0; i < framesToCopy; i++)
@@ -140,9 +148,9 @@ public sealed class TruePeakMeter
                 _inBlockPos += framesToCopy;
                 frameOffset += framesToCopy;
 
-                if (_inBlockPos == BlockSize)
+                if (_inBlockPos == _blockSize)
                 {
-                    ProcessBlock(BlockSize);
+                    ProcessBlock(_blockSize);
                     _inBlockPos = 0;
                 }
             }
@@ -168,7 +176,7 @@ public sealed class TruePeakMeter
 
             while (frameOffset < totalFrames)
             {
-                int framesToCopy = Math.Min(totalFrames - frameOffset, BlockSize - _inBlockPos);
+                int framesToCopy = Math.Min(totalFrames - frameOffset, _blockSize - _inBlockPos);
                 int baseSampleIdx = frameOffset << 1;
 
                 for (int i = 0; i < framesToCopy; i++)
@@ -189,9 +197,9 @@ public sealed class TruePeakMeter
                 _inBlockPos += framesToCopy;
                 frameOffset += framesToCopy;
 
-                if (_inBlockPos == BlockSize)
+                if (_inBlockPos == _blockSize)
                 {
-                    ProcessBlock(BlockSize);
+                    ProcessBlock(_blockSize);
                     _inBlockPos = 0;
                 }
             }
@@ -205,7 +213,7 @@ public sealed class TruePeakMeter
 
             while (frameOffset < totalFrames)
             {
-                int framesToCopy = Math.Min(totalFrames - frameOffset, BlockSize - _inBlockPos);
+                int framesToCopy = Math.Min(totalFrames - frameOffset, _blockSize - _inBlockPos);
                 int baseSampleIdx = frameOffset * _channelCount;
 
                 for (int i = 0; i < framesToCopy; i++)
@@ -222,9 +230,9 @@ public sealed class TruePeakMeter
                 _inBlockPos += framesToCopy;
                 frameOffset += framesToCopy;
 
-                if (_inBlockPos == BlockSize)
+                if (_inBlockPos == _blockSize)
                 {
-                    ProcessBlock(BlockSize);
+                    ProcessBlock(_blockSize);
                     _inBlockPos = 0;
                 }
             }
