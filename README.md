@@ -118,7 +118,7 @@ Use the packaging script to include the original MusicScope icon and platform la
 
 The application, .NET runtime, and native Avalonia libraries are bundled into one
 executable per OS/architecture. Native libraries extract automatically at startup.
-Windows distributions contain one `.exe`; macOS uses one executable inside its
+Windows distributions contain one `MusicScope.NET.exe`; macOS uses one `MusicScope.NET` executable inside its
 `.app` bundle; Linux includes a launcher and icon files alongside its executable.
 Standalone debugging symbols are omitted. FFmpeg must be available in `PATH` or
 beside the executable for audio file decoding.
@@ -134,7 +134,7 @@ use `-OutputDirectory` and `-Version 1.0.0` to customize it. Publish to a fresh 
 folder to avoid retaining libraries or symbols from previous builds. The macOS output contains
 `MusicScope.NET.app`, with its ICNS icon and `Info.plist`; copy this bundle to Applications.
 Create macOS and Linux archives on Unix to preserve executable permissions. If publishing
-macOS on Windows, run `chmod +x MusicScope.NET.app/Contents/MacOS/MusicScope.Desktop`
+macOS on Windows, run `chmod +x MusicScope.NET.app/Contents/MacOS/MusicScope.NET`
 on the Mac before launching it.
 
 On Linux, extract the distribution to its permanent location and run

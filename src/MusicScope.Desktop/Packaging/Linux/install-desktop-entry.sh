@@ -8,7 +8,7 @@ mkdir -p "$data_dir/applications"
 
 # Desktop Entry string escaping is applied before Exec's quoted argument escaping.
 # Escape backslashes, quotes, backticks, dollars, and literal percent field codes.
-executable=$(printf '%s' "$app_dir/MusicScope.Desktop" | sed 's/\\/\\\\\\\\/g; s/"/\\\\"/g; s/`/\\\\`/g; s/\$/\\\\$/g; s/%/%%/g')
+executable=$(printf '%s' "$app_dir/MusicScope.NET" | sed 's/\\/\\\\\\\\/g; s/"/\\\\"/g; s/`/\\\\`/g; s/\$/\\\\$/g; s/%/%%/g')
 while IFS= read -r line; do
     case "$line" in
         Exec=*) printf 'Exec="%s"\n' "$executable" ;;
@@ -21,7 +21,7 @@ for size in 16 32 48 64 128 256; do
     mkdir -p "$icon_dir"
     cp "$app_dir/Assets/MusicScope-$size.png" "$icon_dir/MusicScope.NET.png"
 done
-chmod +x "$app_dir/MusicScope.Desktop"
+chmod +x "$app_dir/MusicScope.NET"
 if command -v update-desktop-database >/dev/null 2>&1; then
     update-desktop-database "$data_dir/applications"
 fi

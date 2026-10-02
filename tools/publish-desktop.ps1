@@ -29,6 +29,12 @@ if ($RuntimeIdentifier.StartsWith('osx-')) {
     "-p:Version=$Version" -o $publishPath
 if ($LASTEXITCODE -ne 0) { throw "Publishing $RuntimeIdentifier failed." }
 
+# Rename the published apphost while preserving its embedded assembly/resource names.
+$executableExtension = if ($RuntimeIdentifier.StartsWith('win-')) { '.exe' } else { '' }
+$executable = Join-Path $publishPath "MusicScope.NET$executableExtension"
+Move-Item -LiteralPath (Join-Path $publishPath "MusicScope.Desktop$executableExtension") `
+    -Destination $executable -Force
+
 # Native packages can ship their own PDBs even when managed symbols are embedded.
 Get-ChildItem -LiteralPath $publishPath -Filter *.pdb -File -Recurse | Remove-Item -Force
 
@@ -44,7 +50,6 @@ if ($RuntimeIdentifier.StartsWith('osx-')) {
 }
 
 if (-not $IsWindows) {
-    $executable = Join-Path $publishPath 'MusicScope.Desktop'
     if (Test-Path -LiteralPath $executable) {
         [IO.File]::SetUnixFileMode($executable, [IO.UnixFileMode]::UserRead -bor [IO.UnixFileMode]::UserWrite `
             -bor [IO.UnixFileMode]::UserExecute -bor [IO.UnixFileMode]::GroupRead `
