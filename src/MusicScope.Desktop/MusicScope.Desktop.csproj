@@ -5,12 +5,18 @@
     <Nullable>enable</Nullable>
     <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
     <ApplicationManifest>app.manifest</ApplicationManifest>
+    <ApplicationIcon>Assets/MusicScope.ico</ApplicationIcon>
   </PropertyGroup>
 
   <ItemGroup>
     <Folder Include="Models\" />
     <InternalsVisibleTo Include="MusicScope.Desktop.Tests" />
     <AvaloniaResource Include="Assets\**" />
+    <None Update="Assets/MusicScope*.png" CopyToPublishDirectory="PreserveNewest" />
+    <None Update="Packaging/Linux/MusicScope.NET.desktop" Link="MusicScope.NET.desktop"
+          CopyToPublishDirectory="PreserveNewest" Condition="$([System.String]::Copy('$(RuntimeIdentifier)').StartsWith('linux-'))" />
+    <None Update="Packaging/Linux/install-desktop-entry.sh" Link="install-desktop-entry.sh"
+          CopyToPublishDirectory="PreserveNewest" Condition="$([System.String]::Copy('$(RuntimeIdentifier)').StartsWith('linux-'))" />
   </ItemGroup>
 
   <ItemGroup>

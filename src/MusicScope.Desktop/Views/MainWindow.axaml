@@ -12,6 +12,7 @@
         MinWidth="960" MinHeight="960"
         Width="1200" Height="980"
         WindowStartupLocation="CenterScreen"
+        Icon="avares://MusicScope.Desktop/Assets/MusicScope.ico"
         Title="MusicScope.NET - High Resolution Audio Analyzer">
 
     <Design.DataContext>
