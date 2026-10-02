@@ -25,8 +25,8 @@ public static class TestAppBuilder
 public class ChartHoverTests
 {
     [AvaloniaTheory]
-    [InlineData(16, 181)]
-    [InlineData(24, 121)]
+    [InlineData(16, 168)]
+    [InlineData(24, 113)]
     public void Spectrum_RendersCurveAndQuietLiveBarsUsingSelectedScale(int bitDepth, int curveY)
     {
         var chart = new SpectrumGraphControl
@@ -54,7 +54,7 @@ public class ChartHoverTests
                     : (pixels[offset], pixels[offset + 1], pixels[offset + 2]);
             }
 
-            // At -60 dB the legacy scale puts the curve near y=181 (16-bit) or y=121 (24-bit).
+            // At -60 dB the legacy scale puts the curve near y=168 (16-bit) or y=113 (24-bit).
             Assert.Contains(Enumerable.Range(curveY - 1, 4), y =>
             {
                 var pixel = Pixel(280, y);
@@ -63,7 +63,7 @@ public class ChartHoverTests
             // A -100 dB live bar is visible above the baseline only on the 144 dB scale.
             bool quietBarVisible = Enumerable.Range(203, 4).Any(x =>
             {
-                var pixel = Pixel(x, 200);
+                var pixel = Pixel(x, 190);
                 return pixel.Green > 30 && pixel.Red < 10 && pixel.Blue < 60;
             });
             Assert.Equal(bitDepth == 24, quietBarVisible);
@@ -86,7 +86,7 @@ public class ChartHoverTests
         {
             var chart = window.GetVisualDescendants().OfType<SpectrumGraphControl>().Single();
             double x = 38 + (chart.Bounds.Width - 48) / 2;
-            double bottom = chart.Bounds.Height - 20;
+            double bottom = chart.Bounds.Height - 36;
             window.MouseMove(chart.TranslatePoint(new Point(x, bottom), window)!.Value);
             Assert.Equal(floor, chart.GetHoverReadout()!.Value.CursorDb);
             window.MouseMove(chart.TranslatePoint(new Point(x, (16 + bottom) / 2), window)!.Value);
@@ -109,7 +109,7 @@ public class ChartHoverTests
         try
         {
             var chart = window.GetVisualDescendants().OfType<SpectrumGraphControl>().Single();
-            var point = new Point(38 + (chart.Bounds.Width - 48) / 2, (16 + chart.Bounds.Height - 20) / 2);
+            var point = new Point(38 + (chart.Bounds.Width - 48) / 2, (16 + chart.Bounds.Height - 36) / 2);
             window.MouseMove(chart.TranslatePoint(point, window)!.Value);
             var before = Capture(window);
             Assert.Equal(-34.9, chart.GetHoverReadout()!.Value.CursorDb!.Value, 1);

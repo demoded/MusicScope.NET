@@ -3,7 +3,7 @@
 <plist version="1.0">
   <dict>
     <key>CFBundleExecutable</key>
-    <string>MusicScope.Desktop</string>
+    <string>MusicScope.NET</string>
     <key>CFBundleName</key>
     <string>MusicScope.NET</string>
     <key>CFBundleIdentifier</key>

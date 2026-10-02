@@ -93,6 +93,8 @@ dotnet run --project src/MusicScope.Desktop/MusicScope.Desktop.csproj
 
 Use PowerShell 7 (`pwsh`) and the packaging helper from the repository root. It publishes Release, self-contained, single-file builds with the original application icon and platform launcher metadata:
 
+The helper enables `PublishSingleFile` and `IncludeNativeLibrariesForSelfExtract`, bundles the .NET runtime and native Avalonia libraries, embeds managed debugging symbols, and removes standalone PDB files. Native libraries extract automatically at startup. FFmpeg remains an external dependency and must be available in `PATH` or beside the executable for audio file decoding.
+
 ```pwsh
 # Windows (x64 / arm64)
 ./tools/publish-desktop.ps1 -RuntimeIdentifier win-x64
@@ -109,9 +111,9 @@ Use PowerShell 7 (`pwsh`) and the packaging helper from the repository root. It 
 
 Output defaults to `dist/<RuntimeIdentifier>/`. Use `-OutputDirectory` to override it and `-Version 1.0.0` to set the assembly and macOS bundle version; the version must have three numeric components without a `v` prefix. Use fresh output folders for each release to avoid packaging stale files.
 
-* **Windows**: the executable embeds `Assets/MusicScope.ico`; the main window uses the same icon.
-* **macOS**: output contains `MusicScope.NET.app/Contents/MacOS/`, `Contents/Resources/MusicScope.icns`, and `Contents/Info.plist`. Install the `.app` in Applications and launch the bundle for the Dock icon and application metadata.
-* **Linux**: output includes PNG icons, `MusicScope.NET.desktop`, and `install-desktop-entry.sh`. Extract to a permanent location, then run `sh ./install-desktop-entry.sh` from that directory to install the launcher and icons for the current user. Run it again after moving the application.
+* **Windows**: output contains one `MusicScope.NET.exe`, which embeds `Assets/MusicScope.ico`; the main window uses the same icon.
+* **macOS**: output contains one `MusicScope.NET` executable in `MusicScope.NET.app/Contents/MacOS/`, plus `Contents/Resources/MusicScope.icns` and `Contents/Info.plist`. Install the `.app` in Applications and launch the bundle for the Dock icon and application metadata.
+* **Linux**: output includes one `MusicScope.NET` executable plus PNG icons, `MusicScope.NET.desktop`, and `install-desktop-entry.sh`. Extract to a permanent location, then run `sh ./install-desktop-entry.sh` from that directory to install the launcher and icons for the current user. Run it again after moving the application.
 
 Create macOS and Linux archives on Unix to preserve executable permissions. When cross-publishing from Windows, set the executable permission on Unix before packaging (see below). A successful cross-publish does not verify launch behavior or taskbar/Dock icons; check those on each target OS.
 
@@ -141,14 +143,15 @@ foreach ($rid in $RIDs) {
 }
 ```
 
-#### 2. Clean Debugging Symbols (PDBs)
+#### 2. Verify Single-File Output
 
-Remove native and managed PDB files from the six distribution folders, including the nested macOS bundles:
+The helper removes standalone PDBs. Verify that no loose managed/native libraries or debugging symbols remain in the six distribution folders, including the nested macOS bundles:
 
 ```pwsh
 foreach ($rid in $RIDs) {
-    Get-ChildItem -LiteralPath "dist/$rid" -Filter *.pdb -File -Recurse |
-        Remove-Item -Force
+    $looseFiles = Get-ChildItem -LiteralPath "dist/$rid" -File -Recurse |
+        Where-Object { $_.Name -match '\.(dll|dylib|so(\..*)?|pdb)$' }
+    if ($looseFiles) { throw "Unexpected libraries or symbols in dist/$rid; publish to a fresh folder." }
 }
 ```
 
@@ -170,8 +173,8 @@ macOS, using PowerShell 7 and `ditto` to preserve the `.app` bundle and executab
 ```pwsh
 New-Item -ItemType Directory -Force -Path dist/release | Out-Null
 
-chmod +x dist/osx-x64/MusicScope.NET.app/Contents/MacOS/MusicScope.Desktop
-chmod +x dist/osx-arm64/MusicScope.NET.app/Contents/MacOS/MusicScope.Desktop
+chmod +x dist/osx-x64/MusicScope.NET.app/Contents/MacOS/MusicScope.NET
+chmod +x dist/osx-arm64/MusicScope.NET.app/Contents/MacOS/MusicScope.NET
 ditto -c -k --sequesterRsrc --keepParent dist/osx-x64/MusicScope.NET.app "dist/release/MusicScope.NET-$Version-osx-x64.zip"
 ditto -c -k --sequesterRsrc --keepParent dist/osx-arm64/MusicScope.NET.app "dist/release/MusicScope.NET-$Version-osx-arm64.zip"
 ```
@@ -181,8 +184,8 @@ Linux, using PowerShell 7 and `tar` to preserve executable permissions:
 ```pwsh
 New-Item -ItemType Directory -Force -Path dist/release | Out-Null
 
-chmod +x dist/linux-x64/MusicScope.Desktop
-chmod +x dist/linux-arm64/MusicScope.Desktop
+chmod +x dist/linux-x64/MusicScope.NET
+chmod +x dist/linux-arm64/MusicScope.NET
 tar -czf "dist/release/MusicScope.NET-$Version-linux-x64.tar.gz" -C dist/linux-x64 .
 tar -czf "dist/release/MusicScope.NET-$Version-linux-arm64.tar.gz" -C dist/linux-arm64 .
 ```

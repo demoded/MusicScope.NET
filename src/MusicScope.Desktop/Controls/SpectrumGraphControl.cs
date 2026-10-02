@@ -12,15 +12,6 @@ namespace MusicScope.Desktop.Controls;
 /// </summary>
 public sealed class SpectrumGraphControl : FrequencyChartControl
 {
-    public static readonly StyledProperty<int> BitDepthProperty =
-        AvaloniaProperty.Register<SpectrumGraphControl, int>(nameof(BitDepth), 16);
-
-    public int BitDepth
-    {
-        get => GetValue(BitDepthProperty);
-        set => SetValue(BitDepthProperty, value);
-    }
-
     // SpectrumControl.java selects the 96 dB scale only for 16-bit input.
     private double MinimumDb => BitDepth == 16 ? -96.0 : -144.0;
     private double AmplitudeScale => BitDepth == 16 ? 3000.0 : 500000.0;
