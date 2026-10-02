@@ -90,65 +90,120 @@ dotnet run --project src/MusicScope.Desktop/MusicScope.Desktop.csproj
 ```
 
 ### Publish Self-Contained Builds (Single Platform)
+
+Use PowerShell 7 (`pwsh`) and the packaging helper from the repository root. It publishes Release, self-contained, single-file builds with the original application icon and platform launcher metadata:
+
 ```pwsh
 # Windows (x64 / arm64)
-dotnet publish src/MusicScope.Desktop -r win-x64 -c Release -o publish/win-x64
-dotnet publish src/MusicScope.Desktop -r win-arm64 -c Release -o publish/win-arm64
+./tools/publish-desktop.ps1 -RuntimeIdentifier win-x64
+./tools/publish-desktop.ps1 -RuntimeIdentifier win-arm64
 
 # macOS (Apple Silicon / Intel)
-dotnet publish src/MusicScope.Desktop -r osx-arm64 -c Release -o publish/osx-arm64
-dotnet publish src/MusicScope.Desktop -r osx-x64 -c Release -o publish/osx-x64
+./tools/publish-desktop.ps1 -RuntimeIdentifier osx-arm64
+./tools/publish-desktop.ps1 -RuntimeIdentifier osx-x64
 
 # Linux (x64 / arm64)
-dotnet publish src/MusicScope.Desktop -r linux-x64 -c Release -o publish/linux-x64
-dotnet publish src/MusicScope.Desktop -r linux-arm64 -c Release -o publish/linux-arm64
+./tools/publish-desktop.ps1 -RuntimeIdentifier linux-x64
+./tools/publish-desktop.ps1 -RuntimeIdentifier linux-arm64
 ```
+
+Output defaults to `dist/<RuntimeIdentifier>/`. Use `-OutputDirectory` to override it and `-Version 1.0.0` to set the assembly and macOS bundle version; the version must have three numeric components without a `v` prefix. Use fresh output folders for each release to avoid packaging stale files.
+
+* **Windows**: the executable embeds `Assets/MusicScope.ico`; the main window uses the same icon.
+* **macOS**: output contains `MusicScope.NET.app/Contents/MacOS/`, `Contents/Resources/MusicScope.icns`, and `Contents/Info.plist`. Install the `.app` in Applications and launch the bundle for the Dock icon and application metadata.
+* **Linux**: output includes PNG icons, `MusicScope.NET.desktop`, and `install-desktop-entry.sh`. Extract to a permanent location, then run `sh ./install-desktop-entry.sh` from that directory to install the launcher and icons for the current user. Run it again after moving the application.
+
+Create macOS and Linux archives on Unix to preserve executable permissions. When cross-publishing from Windows, set the executable permission on Unix before packaging (see below). A successful cross-publish does not verify launch behavior or taskbar/Dock icons; check those on each target OS.
+
+### Regenerate the Original Application Icon
+
+The checked-in icon assets are generated from the original `OriginalJavaApp/MusicScope.exe`. Normal builds and publishes do not require Python. To regenerate the assets after extracting the original distribution:
+
+```pwsh
+python -m pip install Pillow
+python tools/extract_application_icon.py
+```
+
+The extractor preserves the native 16, 32, 48, 64, 128, and 256 pixel Windows icon resources and creates the PNG and ICNS variants in `src/MusicScope.Desktop/Assets/`. Only the 512 and 1024 pixel Retina variants are upscaled. Commit these generated application assets; keep the extracted legacy distribution ignored.
 
 ### Creating Cross-Platform GitHub Releases
 
 To build, package, hash, and publish a full multi-platform release for all 6 supported architectures (`win-x64`, `win-arm64`, `osx-x64`, `osx-arm64`, `linux-x64`, `linux-arm64`):
 
 #### 1. Publish All Target Platforms
+
 ```pwsh
+$ReleaseVersion = "1.0.0"
+$Version = "v$ReleaseVersion"
 $RIDs = @("win-x64", "win-arm64", "osx-x64", "osx-arm64", "linux-x64", "linux-arm64")
 foreach ($rid in $RIDs) {
-    dotnet publish src/MusicScope.Desktop -r $rid -c Release -p:PublishSingleFile=true --self-contained true -o "dist/$rid"
+    ./tools/publish-desktop.ps1 -RuntimeIdentifier $rid -Version $ReleaseVersion
 }
 ```
 
 #### 2. Clean Debugging Symbols (PDBs)
-Strip bulky native and managed symbol files (`libSkiaSharp.pdb`, etc.) from distribution folders to save ~100 MB per archive:
+
+Remove native and managed PDB files from the six distribution folders, including the nested macOS bundles:
+
 ```pwsh
-Remove-Item dist/*/*.pdb -Force
+foreach ($rid in $RIDs) {
+    Get-ChildItem -LiteralPath "dist/$rid" -Filter *.pdb -File -Recurse |
+        Remove-Item -Force
+}
 ```
 
 #### 3. Package Distribution Archives
-```pwsh
-New-Item -ItemType Directory -Force -Path dist/release
-$Version = "v1.0.0"
 
-# Windows (ZIP)
+Run each platform's packaging commands from the repository root on the indicated host. If using a separate shell or machine, set `$Version` to the same release tag (for example, `v1.0.0`) and copy the published folders there first.
+
+Windows, using PowerShell 7:
+
+```pwsh
+New-Item -ItemType Directory -Force -Path dist/release | Out-Null
+
 Compress-Archive -Path dist/win-x64/* -DestinationPath "dist/release/MusicScope.NET-$Version-win-x64.zip" -Force
 Compress-Archive -Path dist/win-arm64/* -DestinationPath "dist/release/MusicScope.NET-$Version-win-arm64.zip" -Force
+```
 
-# macOS (ZIP)
-Compress-Archive -Path dist/osx-x64/* -DestinationPath "dist/release/MusicScope.NET-$Version-osx-x64.zip" -Force
-Compress-Archive -Path dist/osx-arm64/* -DestinationPath "dist/release/MusicScope.NET-$Version-osx-arm64.zip" -Force
+macOS, using PowerShell 7 and `ditto` to preserve the `.app` bundle and executable permissions:
 
-# Linux (TAR.GZ to preserve POSIX file execution permissions)
+```pwsh
+New-Item -ItemType Directory -Force -Path dist/release | Out-Null
+
+chmod +x dist/osx-x64/MusicScope.NET.app/Contents/MacOS/MusicScope.Desktop
+chmod +x dist/osx-arm64/MusicScope.NET.app/Contents/MacOS/MusicScope.Desktop
+ditto -c -k --sequesterRsrc --keepParent dist/osx-x64/MusicScope.NET.app "dist/release/MusicScope.NET-$Version-osx-x64.zip"
+ditto -c -k --sequesterRsrc --keepParent dist/osx-arm64/MusicScope.NET.app "dist/release/MusicScope.NET-$Version-osx-arm64.zip"
+```
+
+Linux, using PowerShell 7 and `tar` to preserve executable permissions:
+
+```pwsh
+New-Item -ItemType Directory -Force -Path dist/release | Out-Null
+
+chmod +x dist/linux-x64/MusicScope.Desktop
+chmod +x dist/linux-arm64/MusicScope.Desktop
 tar -czf "dist/release/MusicScope.NET-$Version-linux-x64.tar.gz" -C dist/linux-x64 .
 tar -czf "dist/release/MusicScope.NET-$Version-linux-arm64.tar.gz" -C dist/linux-arm64 .
 ```
 
 #### 4. Generate SHA-256 Checksums
+
+Collect all six archives in `dist/release/` before hashing:
+
 ```pwsh
-Get-ChildItem -Path dist/release -Include *.zip,*.tar.gz | 
-    Get-FileHash -Algorithm SHA256 | 
-    ForEach-Object { "$($_.Hash.ToLower())  $(Split-Path $_.Path -Leaf)" } | 
-    Set-Content -Encoding utf8 dist/release/SHA256SUMS.txt
+Get-ChildItem -LiteralPath dist/release -File |
+    Where-Object { $_.Name -like "MusicScope.NET-$Version-*.zip" -or $_.Name -like "MusicScope.NET-$Version-*.tar.gz" } |
+    Sort-Object Name |
+    Get-FileHash -Algorithm SHA256 |
+    ForEach-Object { "$($_.Hash.ToLowerInvariant())  $(Split-Path $_.Path -Leaf)" } |
+    Set-Content -Encoding utf8NoBOM dist/release/SHA256SUMS.txt
 ```
 
 #### 5. Tag and Publish GitHub Release
+
+Write `dist/release/RELEASE_NOTES.md` and verify the packaged applications on their target platforms before publishing. Tag the commit containing the release changes:
+
 ```pwsh
 # 1. Create and push git tag
 git tag -a $Version -m "Release $Version - Cross-Platform Release"

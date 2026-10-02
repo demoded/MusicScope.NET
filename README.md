@@ -113,6 +113,32 @@ dotnet run --project src/MusicScope.Desktop/MusicScope.Desktop.csproj
 ```
 
 ### Publish Cross-Platform Standalone Builds
+
+Use the packaging script to include the original MusicScope icon and platform launcher metadata:
+
+```pwsh
+./tools/publish-desktop.ps1 -RuntimeIdentifier win-x64
+./tools/publish-desktop.ps1 -RuntimeIdentifier osx-arm64
+./tools/publish-desktop.ps1 -RuntimeIdentifier linux-x64
+```
+
+All six supported runtime identifiers are accepted. Output goes to `dist/<runtime>`;
+use `-OutputDirectory` and `-Version 1.0.0` to customize it. The macOS output contains
+`MusicScope.NET.app`, with its ICNS icon and `Info.plist`; copy this bundle to Applications.
+Create macOS and Linux archives on Unix to preserve executable permissions. If publishing
+macOS on Windows, run `chmod +x MusicScope.NET.app/Contents/MacOS/MusicScope.Desktop`
+on the Mac before launching it.
+
+On Linux, extract the distribution to its permanent location and run
+`sh ./install-desktop-entry.sh` to register its launcher and six icon resolutions for
+the current user. Run it again if you move the distribution directory.
+
+The icon's original 16, 32, 48, 64, 128 and 256 pixel images are extracted unchanged
+from `OriginalJavaApp/MusicScope.exe`. Only the 512/1024 pixel Retina images in the
+macOS ICNS are scaled. To regenerate the assets, install Pillow and run
+`python tools/extract_application_icon.py` after unpacking the original distribution.
+
+For raw publish output without platform packaging:
 ```bash
 # Windows x64
 dotnet publish src/MusicScope.Desktop -r win-x64 -c Release -o publish/win-x64

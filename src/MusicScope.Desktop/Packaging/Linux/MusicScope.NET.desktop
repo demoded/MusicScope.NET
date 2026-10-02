@@ -1,0 +1,9 @@
+[Desktop Entry]
+Type=Application
+Name=MusicScope.NET
+Comment=High resolution audio analyzer
+Exec=MusicScope.Desktop
+Icon=MusicScope.NET
+Terminal=false
+Categories=AudioVideo;Audio;
+StartupWMClass=MusicScope.NET
