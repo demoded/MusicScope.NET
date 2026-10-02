@@ -34,6 +34,8 @@ public abstract class FrequencyChartControl : Control
     protected double EffectiveSampleRate => double.IsFinite(SampleRate) && SampleRate > 0 ? SampleRate : 44100.0;
     protected abstract Rect PlotBounds { get; }
     protected abstract (double? LevelDb, double? CursorDb, string LevelName) GetLevels(Point position);
+    protected virtual double FractionToFrequency(double fraction) => fraction * EffectiveSampleRate / 2;
+    protected virtual double FrequencyToFraction(double frequency) => frequency / (EffectiveSampleRate / 2);
 
     private Point? _hoverPosition;
     private static readonly IPen GuidePen = new Pen(Brushes.Blue, 1);
@@ -84,7 +86,7 @@ public abstract class FrequencyChartControl : Control
 
     private bool IsInPlot(Point position) => PlotBounds.Width > 0 && PlotBounds.Height > 0 && PlotBounds.Contains(position);
 
-    private void UpdateHoverFrequency()
+    protected void UpdateHoverFrequency()
     {
         if (_hoverPosition is not { } position) return;
         if (!IsInPlot(position))
@@ -92,7 +94,7 @@ public abstract class FrequencyChartControl : Control
             ClearHover();
             return;
         }
-        SetCurrentValue(HoverFrequencyProperty, (position.X - PlotBounds.X) / PlotBounds.Width * EffectiveSampleRate / 2);
+        SetCurrentValue(HoverFrequencyProperty, FractionToFrequency((position.X - PlotBounds.X) / PlotBounds.Width));
     }
 
     private void ClearHover()
@@ -107,7 +109,7 @@ public abstract class FrequencyChartControl : Control
     {
         if (_hoverPosition is not { } position || !IsInPlot(position)) return null;
         var (level, cursor, name) = GetLevels(position);
-        double frequency = (position.X - PlotBounds.X) / PlotBounds.Width * EffectiveSampleRate / 2;
+        double frequency = FractionToFrequency((position.X - PlotBounds.X) / PlotBounds.Width);
         return new ChartHoverReadout(frequency, level, cursor, name);
     }
 
@@ -118,7 +120,7 @@ public abstract class FrequencyChartControl : Control
             !double.IsFinite(frequency) || frequency < 0 || frequency > EffectiveSampleRate / 2) return;
 
         using var clip = context.PushClip(plot);
-        double x = plot.X + frequency / (EffectiveSampleRate / 2) * plot.Width;
+        double x = plot.X + FrequencyToFraction(frequency) * plot.Width;
         context.DrawLine(GuidePen, new Point(x, plot.Top), new Point(x, plot.Bottom));
 
         if (GetHoverReadout() is not { } readout || _hoverPosition is not { } position) return;

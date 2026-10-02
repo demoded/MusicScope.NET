@@ -156,6 +156,12 @@ public partial class MainViewModel : ViewModelBase
     private double[]? _instantSpectrumMagnitudes;
 
     [ObservableProperty]
+    private MusicScope.Core.DSP.SpectrumFrame? _linearSpectrum;
+
+    [ObservableProperty]
+    private MusicScope.Core.DSP.SpectrumFrame? _logSpectrum;
+
+    [ObservableProperty]
     private float[]? _goniometerPointsX;
 
     [ObservableProperty]
@@ -391,6 +397,8 @@ public partial class MainViewModel : ViewModelBase
 
         SpectrumMagnitudes = s.CumulativePeakSpectrumDb ?? s.InstantSpectrumDb;
         InstantSpectrumMagnitudes = s.InstantSpectrumDb;
+        LinearSpectrum = s.LinearSpectrum;
+        LogSpectrum = s.LogSpectrum;
         GoniometerPointsX = s.GoniometerPointsX;
         GoniometerPointsY = s.GoniometerPointsY;
 
@@ -481,6 +489,9 @@ public partial class MainViewModel : ViewModelBase
         InstantPlr = 0.0;
 
         SpectrumMagnitudes = r.SpectrumMagnitudesDb;
+        LinearSpectrum = r.LinearSpectrum;
+        LogSpectrum = r.LogSpectrum;
+        InstantSpectrumMagnitudes = null;
         if (r.PeakHistory != null && r.PeakHistory.Length > 0)
             PeakHistory = r.PeakHistory;
         if (r.LoudnessHistory != null && r.LoudnessHistory.Length > 0)

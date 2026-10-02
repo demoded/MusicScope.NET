@@ -21,6 +21,8 @@ public sealed class AudioAnalysisEngine
     private readonly StereoAnalyzer _stereoAnalyzer;
     private readonly FastFourierTransform _fft;
     private readonly double[] _fftWindow;
+    private readonly SpectrumAnalyzer _linearSpectrum;
+    private readonly SpectrumAnalyzer _logSpectrum;
 
     private const int FftSize = 2048;
     private readonly int _fftStride;
@@ -33,8 +35,6 @@ public sealed class AudioAnalysisEngine
     private readonly double[] _fftImagBufferLeft = new double[FftSize];
     private readonly double[] _fftRealBufferRight = new double[FftSize];
     private readonly double[] _fftImagBufferRight = new double[FftSize];
-    private readonly double[] _smoothedSpectrum = new double[FftSize / 2];
-    private readonly double[] _peakHoldSpectrum = new double[FftSize / 2];
     private readonly double[] _latestInstantSpectrumDb = new double[FftSize / 2];
     private readonly double[] _peakHoldSpectrumDb = new double[FftSize / 2];
     private int _spectrumFftCount;
@@ -75,8 +75,8 @@ public sealed class AudioAnalysisEngine
         _fftStride = Math.Max(FftSize, (int)(sampleRate * 0.050));
         _fft = new FastFourierTransform(FftSize);
         _fftWindow = WindowFunctions.Create(WindowType.BlackmanHarris, FftSize);
-        Array.Fill(_smoothedSpectrum, 1e-10);
-        Array.Fill(_peakHoldSpectrum, 1e-10);
+        _linearSpectrum = new SpectrumAnalyzer(FftSize, sampleRate);
+        _logSpectrum = new SpectrumAnalyzer(8192, sampleRate);
         Array.Fill(_latestInstantSpectrumDb, -140.0);
         Array.Fill(_peakHoldSpectrumDb, -140.0);
         Array.Fill(_peakHistory, -60.0);
@@ -88,6 +88,7 @@ public sealed class AudioAnalysisEngine
     /// </summary>
     public void ProcessAudioBlock(ReadOnlySpan<float> interleavedSamples)
     {
+        _logSpectrum.Process(interleavedSamples, _channelCount);
         _loudnessMeter.ProcessInterleaved(interleavedSamples);
         _truePeakMeter.ProcessInterleaved(interleavedSamples);
 
@@ -216,6 +217,8 @@ public sealed class AudioAnalysisEngine
             Correlation = _stereoAnalyzer.RealtimeCorrelation,
             InstantSpectrumDb = spectrumCopy,
             CumulativePeakSpectrumDb = peakHoldCopy,
+            LinearSpectrum = _linearSpectrum.Capture(),
+            LogSpectrum = _logSpectrum.Capture(),
             PeakHistory = peakHistoryCopy,
             LoudnessHistory = loudnessHistoryCopy,
             SpectrogramMax = _spectrogramMax,
@@ -232,20 +235,25 @@ public sealed class AudioAnalysisEngine
         _framesSinceLastFft = 0;
 
         int n3 = _ringBufferPos;
+        bool equalChannels = true;
         for (int n = 0; n < FftSize; n++)
         {
             _fftRealBufferLeft[n] = _fftWindow[n] * _ringBufferLeft[n3];
             _fftImagBufferLeft[n] = 0.0;
             _fftRealBufferRight[n] = _fftWindow[n] * _ringBufferRight[n3];
             _fftImagBufferRight[n] = 0.0;
+            equalChannels &= _fftRealBufferLeft[n] == _fftRealBufferRight[n];
             if (++n3 >= FftSize) n3 = 0;
         }
 
         _fft.Forward(_fftRealBufferLeft, _fftImagBufferLeft);
-        _fft.Forward(_fftRealBufferRight, _fftImagBufferRight);
-
-        // MusicScope SpectrumModule.java lines 56, 120-121: normalizes by (FFT / 8) = 256.0
-        double normFactor = FftSize / 8.0;
+        if (equalChannels)
+        {
+            _fftRealBufferLeft.AsSpan().CopyTo(_fftRealBufferRight);
+            _fftImagBufferLeft.AsSpan().CopyTo(_fftImagBufferRight);
+        }
+        else _fft.Forward(_fftRealBufferRight, _fftImagBufferRight);
+        _linearSpectrum.Update(_fftRealBufferLeft, _fftImagBufferLeft, _fftRealBufferRight, _fftImagBufferRight);
 
         // Determine row in 250-row spectrogram
         // matching MusicScope WaterfallControl.java lines 344-350
@@ -259,31 +267,12 @@ public sealed class AudioAnalysisEngine
 
         for (int b = 0; b < FftSize / 2; b++)
         {
-            double reL = _fftRealBufferLeft[b] / normFactor;
-            double imL = _fftImagBufferLeft[b] / normFactor;
-            double dL = Math.Sqrt(reL * reL + imL * imL);
+            double magnitude = _linearSpectrum.GetMagnitude(b);
+            _latestInstantSpectrumDb[b] = 20.0 * Math.Log10(magnitude);
+            _peakHoldSpectrumDb[b] = 20.0 * Math.Log10(_linearSpectrum.GetPeakMagnitude(b));
 
-            double reR = _fftRealBufferRight[b] / normFactor;
-            double imR = _fftImagBufferRight[b] / normFactor;
-            double dR = Math.Sqrt(reR * reR + imR * imR);
-
-            double instant = (dL + dR) / 2.0;
-
-            // Recursive 50% single-pole IIR filter matching SpectrumModule.java line 167
-            _smoothedSpectrum[b] = (_smoothedSpectrum[b] + instant) / 2.0;
-            if (_smoothedSpectrum[b] < 1e-10)
-                _smoothedSpectrum[b] = 1e-10;
-
-            // Cumulative peak-hold of smoothed magnitude matching SpectrumControl.java line 398-399
-            if (_smoothedSpectrum[b] > _peakHoldSpectrum[b])
-                _peakHoldSpectrum[b] = _smoothedSpectrum[b];
-
-            _latestInstantSpectrumDb[b] = 20.0 * Math.Log10(_smoothedSpectrum[b]);
-            _peakHoldSpectrumDb[b] = 20.0 * Math.Log10(_peakHoldSpectrum[b]);
-
-            // Accumulate linear magnitude into 2D spectrogram buffers (250 rows x 1024 cols)
-            // matching WaterfallControl.java line 344-350
-            float linMag = (float)_smoothedSpectrum[b];
+            // Accumulate linear magnitude into 2D spectrogram buffers (250 rows x 1024 cols).
+            float linMag = (float)magnitude;
             int idx = rowOffset + b;
             if (isFirstInRow)
             {
@@ -307,6 +296,7 @@ public sealed class AudioAnalysisEngine
     /// </summary>
     public FullAnalysisReport GenerateReport(string title = "", string filePath = "", string format = "", TimeSpan duration = default, int bitDepth = 16)
     {
+        _logSpectrum.Finish();
         if (_bufferedFrames >= FftSize && _framesSinceLastFft > 0)
         {
             ExecuteFft(_processedFrames);
@@ -350,6 +340,8 @@ public sealed class AudioAnalysisEngine
             Levels = levelsResult,
             Stereo = stereoResult,
             SpectrumMagnitudesDb = finalSpectrumDb,
+            LinearSpectrum = _linearSpectrum.Capture(),
+            LogSpectrum = _logSpectrum.Capture(),
             PeakHistory = finalPeakHistory,
             LoudnessHistory = finalLoudnessHistory,
             SpectrogramMax = (float[])_spectrogramMax.Clone(),
@@ -367,13 +359,13 @@ public sealed class AudioAnalysisEngine
         _loudnessMeter.Reset();
         _truePeakMeter.Reset();
         _stereoAnalyzer.Reset();
+        _linearSpectrum.Reset();
+        _logSpectrum.Reset();
         _bufferedFrames = 0;
         _framesSinceLastFft = 0;
         _ringBufferPos = 0;
         Array.Clear(_ringBufferLeft, 0, _ringBufferLeft.Length);
         Array.Clear(_ringBufferRight, 0, _ringBufferRight.Length);
-        Array.Fill(_smoothedSpectrum, 1e-10);
-        Array.Fill(_peakHoldSpectrum, 1e-10);
         Array.Fill(_peakHoldSpectrumDb, -140.0);
         Array.Fill(_latestInstantSpectrumDb, -140.0);
         Array.Fill(_peakHistory, -60.0);

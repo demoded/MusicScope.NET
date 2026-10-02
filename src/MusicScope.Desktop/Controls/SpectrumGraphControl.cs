@@ -1,207 +1,237 @@
 using System;
 using System.Globalization;
 using Avalonia;
-using Avalonia.Controls;
+using Avalonia.Input;
 using Avalonia.Media;
+using MusicScope.Core.DSP;
 
 namespace MusicScope.Desktop.Controls;
 
 /// <summary>
-/// Linear Frequency Spectrum Control directly modeling the middle row of the MusicScope UI.
-/// Displays dB scale (0, -6, -12, -24, -40, -60, -96), cumulative peak hold curve (#FFBF00),
-/// live instantaneous green level bars, bright green baseline, Nyquist ticks, and switch buttons.
+/// Frequency spectrum with the original Linear/Log, Left/Right, Pano/Phase and -200dB actions.
 /// </summary>
 public sealed class SpectrumGraphControl : FrequencyChartControl
 {
     public static readonly StyledProperty<double[]?> MagnitudesDbProperty =
         AvaloniaProperty.Register<SpectrumGraphControl, double[]?>(nameof(MagnitudesDb));
-
     public static readonly StyledProperty<double[]?> InstantMagnitudesDbProperty =
         AvaloniaProperty.Register<SpectrumGraphControl, double[]?>(nameof(InstantMagnitudesDb));
+    public static readonly StyledProperty<SpectrumFrame?> LinearSpectrumProperty =
+        AvaloniaProperty.Register<SpectrumGraphControl, SpectrumFrame?>(nameof(LinearSpectrum));
+    public static readonly StyledProperty<SpectrumFrame?> LogSpectrumProperty =
+        AvaloniaProperty.Register<SpectrumGraphControl, SpectrumFrame?>(nameof(LogSpectrum));
+    public static readonly StyledProperty<int> BitDepthProperty =
+        AvaloniaProperty.Register<SpectrumGraphControl, int>(nameof(BitDepth), 16);
+    public static readonly StyledProperty<bool> IsLogarithmicProperty =
+        AvaloniaProperty.Register<SpectrumGraphControl, bool>(nameof(IsLogarithmic));
+    public static readonly StyledProperty<bool> ShowLeftRightProperty =
+        AvaloniaProperty.Register<SpectrumGraphControl, bool>(nameof(ShowLeftRight));
+    public static readonly StyledProperty<bool> ShowPanoramaPhaseProperty =
+        AvaloniaProperty.Register<SpectrumGraphControl, bool>(nameof(ShowPanoramaPhase));
+    public static readonly StyledProperty<bool> ExtendedRangeProperty =
+        AvaloniaProperty.Register<SpectrumGraphControl, bool>(nameof(ExtendedRange));
 
-    public double[]? MagnitudesDb
+    public double[]? MagnitudesDb { get => GetValue(MagnitudesDbProperty); set => SetValue(MagnitudesDbProperty, value); }
+    public double[]? InstantMagnitudesDb { get => GetValue(InstantMagnitudesDbProperty); set => SetValue(InstantMagnitudesDbProperty, value); }
+    public SpectrumFrame? LinearSpectrum { get => GetValue(LinearSpectrumProperty); set => SetValue(LinearSpectrumProperty, value); }
+    public SpectrumFrame? LogSpectrum { get => GetValue(LogSpectrumProperty); set => SetValue(LogSpectrumProperty, value); }
+    public int BitDepth { get => GetValue(BitDepthProperty); set => SetValue(BitDepthProperty, value); }
+    public bool IsLogarithmic { get => GetValue(IsLogarithmicProperty); set => SetValue(IsLogarithmicProperty, value); }
+    public bool ShowLeftRight { get => GetValue(ShowLeftRightProperty); set => SetValue(ShowLeftRightProperty, value); }
+    public bool ShowPanoramaPhase { get => GetValue(ShowPanoramaPhaseProperty); set => SetValue(ShowPanoramaPhaseProperty, value); }
+    public bool ExtendedRange { get => GetValue(ExtendedRangeProperty); set => SetValue(ExtendedRangeProperty, value); }
+
+    private SpectrumFrame? SelectedSpectrum => IsLogarithmic ? LogSpectrum : LinearSpectrum;
+    internal double FloorDb => ExtendedRange ? -200 : BitDepth == 16 ? -96 : -144;
+    private double ScaleFactor => ExtendedRange ? 5e8 : BitDepth == 16 ? 3000 : 500000;
+    protected override Rect PlotBounds => new(38, 16, Math.Max(0, Bounds.Width - 48), Math.Max(0, Bounds.Height - 52));
+
+    // SpectrumControl.java: default log curvature 0.005 with 4096 positive FFT bins.
+    protected override double FractionToFrequency(double fraction) => EffectiveSampleRate / 2 *
+        (IsLogarithmic ? (Math.Pow(21.48, fraction) - 1) / 20.48 : fraction);
+    protected override double FrequencyToFraction(double frequency)
     {
-        get => GetValue(MagnitudesDbProperty);
-        set => SetValue(MagnitudesDbProperty, value);
+        double fraction = frequency / (EffectiveSampleRate / 2);
+        return IsLogarithmic ? Math.Log10(1 + 20.48 * fraction) / Math.Log10(21.48) : fraction;
     }
 
-    public double[]? InstantMagnitudesDb
+    protected override void OnPropertyChanged(AvaloniaPropertyChangedEventArgs change)
     {
-        get => GetValue(InstantMagnitudesDbProperty);
-        set => SetValue(InstantMagnitudesDbProperty, value);
+        base.OnPropertyChanged(change);
+        if (change.Property == IsLogarithmicProperty) UpdateHoverFrequency();
     }
 
-    protected override Rect PlotBounds => new(38, 16, Math.Max(0, Bounds.Width - 48), Math.Max(0, Bounds.Height - 36));
+    internal double DbToY(double db)
+    {
+        double amplitude = Math.Pow(10, Math.Clamp(db, FloorDb, 0) / 20);
+        return PlotBounds.Bottom - Math.Log10(1 + amplitude * ScaleFactor) /
+            Math.Log10(1 + ScaleFactor) * PlotBounds.Height;
+    }
 
     protected override (double? LevelDb, double? CursorDb, string LevelName) GetLevels(Point position)
     {
         Rect plot = PlotBounds;
-        double fraction = Math.Clamp((position.X - plot.X) / plot.Width, 0, 1);
+        double frequency = FractionToFrequency(Math.Clamp((position.X - plot.X) / plot.Width, 0, 1));
         double? peak = null;
-        if (MagnitudesDb is { Length: >= 4 } magnitudes)
+        var magnitudes = SelectedSpectrum?.PeakDb ?? MagnitudesDb;
+        if (magnitudes is { Length: >= 4 })
         {
-            int bin = (int)Math.Round(fraction * (magnitudes.Length - 1));
+            double bins = SelectedSpectrum == null ? magnitudes.Length - 1 : magnitudes.Length;
+            int bin = Math.Clamp((int)Math.Round(frequency / (EffectiveSampleRate / 2) * bins), 0, magnitudes.Length - 1);
             peak = magnitudes[bin];
         }
-
-        // Inverse of DbToY: the pointer's axis level is distinct from the curve's peak level.
         double t = Math.Clamp((plot.Bottom - position.Y) / plot.Height, 0, 1);
-        double amplitude = (Math.Pow(3001.0, t) - 1.0) / 3000.0;
-        double cursorDb = amplitude > 0 ? Math.Clamp(20 * Math.Log10(amplitude), -96, 0) : -96;
+        double amplitude = (Math.Pow(1 + ScaleFactor, t) - 1) / ScaleFactor;
+        double cursorDb = amplitude > 0 ? Math.Clamp(20 * Math.Log10(amplitude), FloorDb, 0) : FloorDb;
         return (peak, cursorDb, "Peak");
     }
 
-    private static readonly IBrush BgBrush = new SolidColorBrush(Color.FromRgb(0, 0, 0)); // Pure black
-    private static readonly IBrush GridBrush = new SolidColorBrush(Color.FromRgb(35, 40, 45)); // Dim grid line (#333333)
-    private static readonly IBrush TextBrush = new SolidColorBrush(Color.FromRgb(220, 220, 220)); // Grid dB text
-    private static readonly IBrush GreenHeaderBrush = new SolidColorBrush(Color.FromRgb(0, 255, 0)); // Neon green #00FF00
-    private static readonly IBrush SwitchTextBrush = new SolidColorBrush(Color.FromRgb(102, 102, 102)); // Switch button text #666666
-    private static readonly IPen GreenBaselinePen = new Pen(new SolidColorBrush(Color.FromRgb(0, 255, 0)), 2.0); // Bright green baseline #00FF00
-    private static readonly IPen GreenTickPen = new Pen(new SolidColorBrush(Color.FromRgb(0, 255, 0)), 1.5);
-    private static readonly IPen SpectrumPen = new Pen(new SolidColorBrush(Color.FromRgb(255, 191, 0)), 1.0); // Iconic Amber #FFBF00
-    private static readonly IPen InstantGreenPen = new Pen(new SolidColorBrush(Color.FromRgb(0, 160, 40)), 1.0); // Dim green live bounce
+    private static readonly IBrush GridBrush = new SolidColorBrush(Color.FromRgb(35, 40, 45));
+    private static readonly IBrush TextBrush = new SolidColorBrush(Color.FromRgb(220, 220, 220));
+    private static readonly IBrush SwitchBrush = new SolidColorBrush(Color.FromRgb(102, 102, 102));
+    private static readonly IPen GridPen = new Pen(GridBrush, 1);
+    private static readonly IPen BaselinePen = new Pen(Brushes.Lime, 2);
+    private static readonly IPen SpectrumPen = new Pen(new SolidColorBrush(Color.Parse("#FFBF00")), 1);
+    private static readonly IPen InstantPen = new Pen(new SolidColorBrush(Color.Parse("#00B400")), 1);
+    private static readonly IPen DimInstantPen = new Pen(new SolidColorBrush(Color.Parse("#005000")), 1);
+    private static readonly IPen LeftPen = new Pen(Brushes.Lime, 2);
+    private static readonly IPen RightPen = new Pen(Brushes.Blue, 2);
+    private static readonly IPen DimLeftPen = new Pen(new SolidColorBrush(Color.Parse("#005000")), 2);
+    private static readonly IPen DimRightPen = new Pen(new SolidColorBrush(Color.Parse("#000050")), 2);
+    private static readonly IPen[] PhasePens = [new Pen(Brushes.Lime, 2), new Pen(Brushes.Yellow, 2), new Pen(Brushes.Red, 2)];
 
     static SpectrumGraphControl()
     {
-        AffectsRender<SpectrumGraphControl>(MagnitudesDbProperty, InstantMagnitudesDbProperty, SampleRateProperty);
+        AffectsRender<SpectrumGraphControl>(MagnitudesDbProperty, InstantMagnitudesDbProperty,
+            LinearSpectrumProperty, LogSpectrumProperty, SampleRateProperty, BitDepthProperty,
+            IsLogarithmicProperty, ShowLeftRightProperty, ShowPanoramaPhaseProperty, ExtendedRangeProperty);
+    }
+
+    private string ActionText(int action) => action switch
+    {
+        0 => IsLogarithmic ? "Log. Frequency Spectrum [kHz]" : "Linear Frequency Spectrum [kHz]",
+        1 => "Left/Right", 2 => "Pano/Phase", _ => "-200dB Mode"
+    };
+
+    private static FormattedText Format(string text, double size, IBrush brush) =>
+        new(text, CultureInfo.InvariantCulture, FlowDirection.LeftToRight, Typeface.Default, size, brush);
+
+    // Measure the actual labels for rendering and hit testing; keep separate frequency and action rows.
+    internal Rect GetActionBounds(int action)
+    {
+        double total = 0;
+        for (int i = 0; i < 4; i++) total += Format(ActionText(i), 10, SwitchBrush).Width;
+        double gap = Math.Max(8, (PlotBounds.Width - total) / 3);
+        double x = PlotBounds.Left;
+        for (int i = 0; i < action; i++) x += Format(ActionText(i), 10, SwitchBrush).Width + gap;
+        return new Rect(x, PlotBounds.Bottom + 20, Format(ActionText(action), 10, SwitchBrush).Width, 16);
+    }
+
+    protected override void OnPointerMoved(PointerEventArgs e)
+    {
+        base.OnPointerMoved(e);
+        var position = e.GetPosition(this);
+        bool overAction = false;
+        for (int i = 0; i < 4; i++) overAction |= GetActionBounds(i).Contains(position);
+        Cursor = new Cursor(overAction ? StandardCursorType.Hand : StandardCursorType.Arrow);
+    }
+
+    protected override void OnPointerPressed(PointerPressedEventArgs e)
+    {
+        base.OnPointerPressed(e);
+        if (!e.GetCurrentPoint(this).Properties.IsLeftButtonPressed) return;
+        for (int i = 0; i < 4; i++)
+        {
+            if (!GetActionBounds(i).Contains(e.GetPosition(this))) continue;
+            switch (i)
+            {
+                case 0: SetCurrentValue(IsLogarithmicProperty, !IsLogarithmic); break;
+                case 1: SetCurrentValue(ShowLeftRightProperty, !ShowLeftRight); break;
+                case 2: SetCurrentValue(ShowPanoramaPhaseProperty, !ShowPanoramaPhase); break;
+                case 3: SetCurrentValue(ExtendedRangeProperty, !ExtendedRange); break;
+            }
+            e.Handled = true;
+            return;
+        }
     }
 
     public override void Render(DrawingContext context)
     {
-        double width = Bounds.Width;
-        double height = Bounds.Height;
-        if (PlotBounds.Width <= 0 || PlotBounds.Height <= 0) return;
-
-        var tf = Typeface.Default;
-        context.FillRectangle(BgBrush, new Rect(0, 0, width, height));
-
+        context.FillRectangle(Brushes.Black, new Rect(Bounds.Size));
         Rect plot = PlotBounds;
-        double topY = plot.Top;
-        double bottomAxisY = plot.Bottom;
-        double plotHeight = plot.Height;
-        double leftMargin = plot.Left;
-        double plotWidth = plot.Width;
-
-        // dB scale levels: 0, -6, -12, -24, -40, -60, -96
-        double[] dbMarks = [0.0, -6.0, -12.0, -24.0, -40.0, -60.0, -96.0];
-
-        double DbToY(double db)
+        if (plot.Width <= 0 || plot.Height <= 0) return;
+        double[] marks = ExtendedRange ? [0, -24, -60, -96, -144, -160, -200] :
+            BitDepth == 16 ? [0, -6, -12, -24, -40, -60, -96] : [0, -12, -24, -40, -60, -100, -144];
+        context.DrawText(Format("dB", 10, SwitchBrush), new Point(8, 4));
+        foreach (double db in marks)
         {
-            // Exact formula from MusicScope SpectrumControl.java:
-            // y = 250 - BufferedAlacReader * log10(d * AlacMetaDataModel + 1.0)
-            double clamped = Math.Clamp(db, -96.0, 0.0);
-            double d = Math.Pow(10.0, clamped / 20.0);
-            double norm = Math.Log10(d * 3000.0 + 1.0) / Math.Log10(3001.0);
-            return bottomAxisY - norm * plotHeight;
-        }
-
-        // Draw "dB" header
-        DrawText(context, "dB", tf, 10, SwitchTextBrush, 8, topY - 12);
-
-        // Draw horizontal grid lines & labels
-        for (int i = 0; i < dbMarks.Length; i++)
-        {
-            double db = dbMarks[i];
             double y = DbToY(db);
-
-            context.DrawLine(new Pen(GridBrush, 1), new Point(leftMargin, y), new Point(leftMargin + plotWidth, y));
-            DrawTextRight(context, db.ToString("F0"), tf, 10, TextBrush, leftMargin - 6, y - 6);
+            context.DrawLine(GridPen, new Point(plot.Left, y), new Point(plot.Right, y));
+            var text = Format(db.ToString("F0", CultureInfo.InvariantCulture), 10, TextBrush);
+            context.DrawText(text, new Point(plot.Left - text.Width - 6, y - 6));
         }
-
-        // Draw Bright Green Baseline across bottom axis
-        context.DrawLine(GreenBaselinePen, new Point(leftMargin, bottomAxisY), new Point(leftMargin + plotWidth, bottomAxisY));
-
-        // Frequency Ticks: fs/8, fs/4, 3fs/8, fs/2 (Nyquist)
-        double nyquistKhz = EffectiveSampleRate / 2000.0;
-        double f1 = nyquistKhz * 0.25;
-        double f2 = nyquistKhz * 0.50;
-        double f3 = nyquistKhz * 0.75;
-        double f4 = nyquistKhz;
-
-        double x1 = leftMargin + plotWidth * 0.25;
-        double x2 = leftMargin + plotWidth * 0.50;
-        double x3 = leftMargin + plotWidth * 0.75;
-        double x4 = leftMargin + plotWidth;
-
-        // Draw tick marks extending below the green baseline
-        context.DrawLine(GreenTickPen, new Point(x1, bottomAxisY), new Point(x1, bottomAxisY + 5));
-        context.DrawLine(GreenTickPen, new Point(x2, bottomAxisY), new Point(x2, bottomAxisY + 5));
-        context.DrawLine(GreenTickPen, new Point(x3, bottomAxisY), new Point(x3, bottomAxisY + 5));
-        context.DrawLine(GreenTickPen, new Point(x4, bottomAxisY), new Point(x4, bottomAxisY + 5));
-
-        // Bottom Axis Labels
-        // "Linear Frequency Spectrum [kHz]" in green #00FF00
-        DrawText(context, "Linear Frequency Spectrum [kHz]", tf, 10, GreenHeaderBrush, leftMargin, bottomAxisY + 6);
-
-        DrawCenteredText(context, f1.ToString("F2", CultureInfo.InvariantCulture), tf, 10, TextBrush, x1, bottomAxisY + 6);
-        DrawCenteredText(context, f2.ToString("F2", CultureInfo.InvariantCulture), tf, 10, TextBrush, x2, bottomAxisY + 6);
-        DrawCenteredText(context, f3.ToString("F2", CultureInfo.InvariantCulture), tf, 10, TextBrush, x3, bottomAxisY + 6);
-        DrawTextRight(context, f4.ToString("F2", CultureInfo.InvariantCulture), tf, 10, TextBrush, x4, bottomAxisY + 6);
-
-        // Switch Buttons / Annotations in gray
-        DrawCenteredText(context, "Left/Right", tf, 9, SwitchTextBrush, leftMargin + plotWidth * 0.33, bottomAxisY + 6);
-        DrawCenteredText(context, "Pano/Phase", tf, 9, SwitchTextBrush, leftMargin + plotWidth * 0.43, bottomAxisY + 6);
-        DrawCenteredText(context, "-200dB Mode", tf, 9, SwitchTextBrush, leftMargin + plotWidth * 0.62, bottomAxisY + 6);
-
-        // 1. Draw Instantaneous Green Spectrum bars (if available during live playback)
-        double[]? instant = InstantMagnitudesDb;
-        if (instant != null && instant.Length > 1)
+        for (int i = 1; i <= 4; i++)
         {
-            int instBins = instant.Length;
-            for (int i = 0; i < instBins; i++)
+            double x = plot.Left + plot.Width * i / 4;
+            context.DrawLine(BaselinePen, new Point(x, plot.Bottom), new Point(x, plot.Bottom + 4));
+            var text = Format((FractionToFrequency(i / 4.0) / 1000).ToString("F2", CultureInfo.InvariantCulture), 10, TextBrush);
+            context.DrawText(text, new Point(x - (i == 4 ? text.Width : text.Width / 2), plot.Bottom + 4));
+        }
+        for (int i = 0; i < 4; i++)
+        {
+            bool active = i switch { 0 => true, 1 => ShowLeftRight, 2 => ShowPanoramaPhase, _ => ExtendedRange };
+            context.DrawText(Format(ActionText(i), 10, active ? Brushes.Lime : SwitchBrush), GetActionBounds(i).TopLeft);
+        }
+        context.DrawLine(BaselinePen, plot.BottomLeft, plot.BottomRight);
+        using (context.PushClip(plot))
+        {
+            var frame = SelectedSpectrum;
+            double X(int bin, int count) => plot.Left + FrequencyToFraction(
+                bin / (double)(frame == null ? count - 1 : count) * EffectiveSampleRate / 2) * plot.Width;
+            void Curve(double[]? data, IPen pen, bool bars = false)
             {
-                double x = leftMargin + (i / (double)(instBins - 1)) * plotWidth;
-                double valDb = instant[i];
-                if (valDb > -96.0)
+                if (data is not { Length: >= 2 }) return;
+                Point? previous = null;
+                for (int b = 0; b < data.Length; b++)
                 {
-                    double y = DbToY(valDb);
-                    context.DrawLine(InstantGreenPen, new Point(x, bottomAxisY), new Point(x, y));
+                    var point = new Point(X(b, data.Length), DbToY(data[b]));
+                    if (bars && data[b] > FloorDb) context.DrawLine(pen, new Point(point.X, plot.Bottom), point);
+                    else if (!bars && previous is { } p) context.DrawLine(pen, p, point);
+                    previous = point;
+                }
+            }
+            if (ShowLeftRight && frame != null)
+            {
+                Curve(frame.LeftDb, ShowPanoramaPhase ? DimLeftPen : LeftPen);
+                Curve(frame.RightDb, ShowPanoramaPhase ? DimRightPen : RightPen);
+            }
+            else if (InstantMagnitudesDb != null)
+                Curve(frame?.InstantDb ?? InstantMagnitudesDb, ShowPanoramaPhase ? DimInstantPen : InstantPen, true);
+            Curve(frame?.PeakDb ?? MagnitudesDb, SpectrumPen);
+            if (ShowPanoramaPhase && frame != null)
+            {
+                double max = 0;
+                for (int b = 0; b < frame.Panorama.Length; b++)
+                    if (frame.LeftDb[b] > FloorDb || frame.RightDb[b] > FloorDb)
+                        max = Math.Max(max, Math.Abs(frame.Panorama[b]));
+                if (max < 0.001) max = 1; // Original silence/near-silence guard.
+                Point? previous = null;
+                for (int b = 0; b < frame.Panorama.Length; b++)
+                {
+                    double value = frame.LeftDb[b] > FloorDb || frame.RightDb[b] > FloorDb ? frame.Panorama[b] / max : 0;
+                    var point = new Point(X(b, frame.Panorama.Length), plot.Center.Y + value * (plot.Height / 2 - 1));
+                    double phase = frame.LeftDb[b] > FloorDb && frame.RightDb[b] > FloorDb ? frame.PhaseRadians[b] : 0;
+                    var pen = PhasePens[phase < Math.PI * 200 / 499 ? 0 : phase < Math.PI * 300 / 499 ? 1 : 2];
+                    if (previous is { } p) context.DrawLine(pen, p, point);
+                    previous = point;
                 }
             }
         }
-
-        // 2. Draw Cumulative Peak Hold Curve in iconic Amber (#FFBF00)
-        double[]? mags = MagnitudesDb;
-        if (mags == null || mags.Length < 4)
+        if (ShowPanoramaPhase)
         {
-            DrawHover(context);
-            return;
-        }
-
-        int binCount = mags.Length;
-        Point? prevPt = null;
-
-        for (int i = 0; i < binCount; i++)
-        {
-            double x = leftMargin + (i / (double)(binCount - 1)) * plotWidth;
-            double valDb = mags[i];
-            double y = DbToY(valDb);
-
-            var pt = new Point(x, y);
-            if (prevPt.HasValue)
-            {
-                context.DrawLine(SpectrumPen, prevPt.Value, pt);
-            }
-            prevPt = pt;
+            context.DrawText(Format("L", 10, TextBrush), new Point(plot.Right - 10, plot.Top + plot.Height / 4));
+            context.DrawText(Format("R", 10, TextBrush), new Point(plot.Right - 10, plot.Top + plot.Height * 3 / 4));
         }
         DrawHover(context);
-    }
-
-    private static void DrawText(DrawingContext ctx, string text, Typeface tf, double size, IBrush brush, double x, double y)
-    {
-        var ft = new FormattedText(text, CultureInfo.InvariantCulture, FlowDirection.LeftToRight, tf, size, brush);
-        ctx.DrawText(ft, new Point(x, y));
-    }
-
-    private static void DrawTextRight(DrawingContext ctx, string text, Typeface tf, double size, IBrush brush, double rightX, double y)
-    {
-        var ft = new FormattedText(text, CultureInfo.InvariantCulture, FlowDirection.LeftToRight, tf, size, brush);
-        ctx.DrawText(ft, new Point(rightX - ft.Width, y));
-    }
-
-    private static void DrawCenteredText(DrawingContext ctx, string text, Typeface tf, double size, IBrush brush, double x, double y)
-    {
-        var ft = new FormattedText(text, CultureInfo.InvariantCulture, FlowDirection.LeftToRight, tf, size, brush);
-        ctx.DrawText(ft, new Point(x - ft.Width / 2.0, y));
     }
 }
