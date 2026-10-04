@@ -180,6 +180,29 @@ public class ChartHoverTests
         finally { window.Close(); }
     }
 
+    [AvaloniaFact]
+    public void Waterfall_UsesBitDepthSpecificBrightnessMapping()
+    {
+        double sixteenBitIntensity = WaterfallControl.GetColorIntensity(0.001f, 16);
+        double twentyFourBitIntensity = WaterfallControl.GetColorIntensity(0.001f, 24);
+        Assert.Equal(70.4 * Math.Log10(0.001 * 6000 + 1), sixteenBitIntensity, 5);
+        Assert.Equal(42.9 * Math.Log10(0.001 * 1_000_000 + 1), twentyFourBitIntensity, 5);
+        Assert.True(twentyFourBitIntensity > sixteenBitIntensity);
+
+        var vm = new MainViewModel { BitDepth = 24 };
+        var window = new MainWindow { DataContext = vm };
+        window.Show();
+        try
+        {
+            var chart = window.GetVisualDescendants().OfType<WaterfallControl>().Single();
+            Assert.Equal(24, chart.BitDepth);
+            vm.BitDepth = 16;
+            Dispatcher.UIThread.RunJobs();
+            Assert.Equal(16, chart.BitDepth);
+        }
+        finally { window.Close(); }
+    }
+
     [AvaloniaTheory]
     [InlineData(0, -6.0206)]
     [InlineData(1, -12.0412)]
