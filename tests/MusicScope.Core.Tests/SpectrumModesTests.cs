@@ -79,7 +79,7 @@ public class SpectrumModesTests
     public void LogSpectrum_PackedRealFftMatchesFullComplexFft_RegardlessOfInputChunkBoundaries()
     {
         const int size = 8192;
-        const int frames = 9600; // Exactly one 50 ms update after the window fills.
+        const int frames = size; // Exactly one FFT at the first full reference window.
         var samples = new float[frames * 2];
         var random = new Random(5);
         for (int i = 0; i < samples.Length; i++) samples[i] = (float)(random.NextDouble() - 0.5);
@@ -111,6 +111,42 @@ public class SpectrumModesTests
         Assert.Equal(actual.RightDb, other.RightDb);
         Assert.Equal(actual.Panorama, other.Panorama);
         Assert.Equal(actual.PhaseRadians, other.PhaseRadians);
+    }
+
+    [Fact]
+    public void LinearSpectrum_UpdatesOncePer2048SampleReferenceBlock()
+    {
+        const int sampleRate = 48000;
+        const int fftSize = 2048;
+        const int frames = fftSize * 4;
+        var samples = new float[frames];
+        var random = new Random(17);
+        for (int i = 0; i < samples.Length; i++) samples[i] = (float)(random.NextDouble() - 0.5);
+
+        var engine = new AudioAnalysisEngine(sampleRate, channelCount: 1);
+        engine.ProcessAudioBlock(samples);
+        var actual = engine.GetRealtimeSnapshot().LinearSpectrum!.PeakDb;
+
+        var fft = new MusicScope.Core.DSP.FastFourierTransform(fftSize);
+        var window = MusicScope.Core.DSP.WindowFunctions.Create(MusicScope.Core.DSP.WindowType.BlackmanHarris, fftSize);
+        var smoothed = Enumerable.Repeat(1e-10, fftSize / 2).ToArray();
+        var expected = Enumerable.Repeat(1e-10, fftSize / 2).ToArray();
+        for (int start = 0; start < frames; start += fftSize)
+        {
+            var real = new double[fftSize];
+            var imag = new double[fftSize];
+            for (int i = 0; i < fftSize; i++) real[i] = samples[start + i] * window[i];
+            fft.Forward(real, imag);
+            for (int bin = 0; bin < expected.Length; bin++)
+            {
+                double magnitude = Math.Sqrt(real[bin] * real[bin] + imag[bin] * imag[bin]) * 8 / fftSize;
+                smoothed[bin] = Math.Max(1e-10, (smoothed[bin] + magnitude) / 2);
+                expected[bin] = Math.Max(expected[bin], smoothed[bin]);
+            }
+        }
+
+        for (int bin = 0; bin < expected.Length; bin++)
+            Assert.Equal(20 * Math.Log10(expected[bin]), actual[bin], 8);
     }
 
     private static AudioAnalysisEngine AnalyzeTone(double amplitude, double rightGain, double phase)

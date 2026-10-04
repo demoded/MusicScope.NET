@@ -19,6 +19,7 @@ public sealed record SpectrumFrame
 /// </summary>
 internal sealed class SpectrumAnalyzer
 {
+    private const int ReferenceBlockSize = 2048;
     private readonly int _size;
     private readonly int _stride;
     private readonly FastFourierTransform _fft;
@@ -30,10 +31,10 @@ internal sealed class SpectrumAnalyzer
     private int _position, _buffered, _sinceFft;
     private bool _hasChannelDifference;
 
-    public SpectrumAnalyzer(int size, double sampleRate)
+    public SpectrumAnalyzer(int size)
     {
         _size = size;
-        _stride = Math.Max(1, (int)(sampleRate * 0.050));
+        _stride = Math.Min(size, ReferenceBlockSize);
         // Pack even/odd real samples into a half-size complex FFT.
         _fft = new(size / 2);
         _packedReal = new double[size / 2];

@@ -72,11 +72,12 @@ public sealed class AudioAnalysisEngine
         _truePeakMeter = new TruePeakMeter(channelCount, sampleRate);
         _stereoAnalyzer = new StereoAnalyzer();
 
-        _fftStride = Math.Max(FftSize, (int)(sampleRate * 0.050));
+        // The reference analyzer advances its spectrum input in fixed 2048-frame blocks.
+        _fftStride = FftSize;
         _fft = new FastFourierTransform(FftSize);
         _fftWindow = WindowFunctions.Create(WindowType.BlackmanHarris, FftSize);
-        _linearSpectrum = new SpectrumAnalyzer(FftSize, sampleRate);
-        _logSpectrum = new SpectrumAnalyzer(8192, sampleRate);
+        _linearSpectrum = new SpectrumAnalyzer(FftSize);
+        _logSpectrum = new SpectrumAnalyzer(8192);
         Array.Fill(_latestInstantSpectrumDb, -140.0);
         Array.Fill(_peakHoldSpectrumDb, -140.0);
         Array.Fill(_peakHistory, -60.0);
@@ -97,7 +98,7 @@ public sealed class AudioAnalysisEngine
             _stereoAnalyzer.ProcessInterleaved(interleavedSamples);
         }
 
-        // Feed circular buffers and execute FFT every 50ms (matching MusicScope SystemController.java & SpectrumModule.java)
+        // Feed circular buffers and execute FFT once per reference 2048-frame input block.
         int frameCount = interleavedSamples.Length / _channelCount;
         for (int i = 0; i < frameCount; i++)
         {
