@@ -32,8 +32,8 @@ public class ChartHoverTests
         var chart = new SpectrumGraphControl
         {
             BitDepth = bitDepth,
-            MagnitudesDb = [-60, -60, -60, -60],
-            InstantMagnitudesDb = [-100, -100, -100, -100]
+            MagnitudesDb = Enumerable.Repeat(-60.0, 1024).ToArray(),
+            InstantMagnitudesDb = Enumerable.Repeat(-100.0, 1024).ToArray()
         };
         var window = new Window { Width = 548, Height = 236, Content = chart };
         window.Show();
@@ -67,6 +67,56 @@ public class ChartHoverTests
                 return pixel.Green > 30 && pixel.Red < 10 && pixel.Blue < 60;
             });
             Assert.Equal(bitDepth == 24, quietBarVisible);
+        }
+        finally { window.Close(); }
+    }
+
+    [AvaloniaFact]
+    public void Spectrum_HighFrequencyPeaksDoNotInterpolateAcrossNeighboringBins()
+    {
+        var magnitudes = Enumerable.Repeat(-144.0, 1024).ToArray();
+        magnitudes[619] = -80; // 29.0 kHz at 96 kHz sample rate.
+        magnitudes[821] = -75; // 38.5 kHz at 96 kHz sample rate.
+        var chart = new SpectrumGraphControl { BitDepth = 24, SampleRate = 96000, MagnitudesDb = magnitudes };
+        var window = new Window { Width = 1794, Height = 420, Content = chart };
+        window.Show();
+        try
+        {
+            using var frame = window.CaptureRenderedFrame();
+            Assert.NotNull(frame);
+            using var buffer = frame.Lock();
+            var pixels = new byte[buffer.RowBytes * buffer.Size.Height];
+            Marshal.Copy(buffer.Address, pixels, 0, pixels.Length);
+
+            bool IsYellow(int x, int y)
+            {
+                int offset = y * buffer.RowBytes + x * 4;
+                var color = buffer.Format == Avalonia.Platform.PixelFormat.Bgra8888
+                    ? (Red: pixels[offset + 2], Green: pixels[offset + 1], Blue: pixels[offset])
+                    : (Red: pixels[offset], Green: pixels[offset + 1], Blue: pixels[offset + 2]);
+                return color.Red > 100 && color.Green > 60 && color.Blue < 20;
+            }
+
+            bool HasVisiblePeak(int bin, double db)
+            {
+                int x = (int)Math.Round(38 + bin / (double)(magnitudes.Length - 1) * (window.Width - 48));
+                int top = (int)Math.Round(chart.DbToY(db));
+                return Enumerable.Range(x - 2, 5).Any(px => Enumerable.Range(top - 2, 5).Any(py => IsYellow(px, py)));
+            }
+
+            bool HasInterpolatedPeak(int bin, double db)
+            {
+                int peakX = (int)Math.Round(38 + bin / (double)(magnitudes.Length - 1) * (window.Width - 48));
+                int xBetweenBins = peakX + 1;
+                int top = (int)Math.Round(chart.DbToY(db));
+                int bottom = (int)Math.Round(chart.DbToY(-144));
+                return Enumerable.Range(top + 2, bottom - top - 4).Any(y => IsYellow(xBetweenBins, y));
+            }
+
+            Assert.True(HasVisiblePeak(619, -80), "The 29 kHz FFT peak should remain visible.");
+            Assert.True(HasVisiblePeak(821, -75), "The 38.5 kHz FFT peak should remain visible.");
+            Assert.False(HasInterpolatedPeak(619, -80), "The 29 kHz peak must not paint interpolated values between FFT bins.");
+            Assert.False(HasInterpolatedPeak(821, -75), "The 38.5 kHz peak must not paint interpolated values between FFT bins.");
         }
         finally { window.Close(); }
     }

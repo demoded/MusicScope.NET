@@ -194,7 +194,7 @@ public sealed class SpectrumGraphControl : FrequencyChartControl
             var frame = SelectedSpectrum;
             double X(int bin, int count) => plot.Left + FrequencyToFraction(
                 bin / (double)(frame == null ? count - 1 : count) * EffectiveSampleRate / 2) * plot.Width;
-            void Curve(double[]? data, IPen pen, bool bars = false)
+            void Curve(double[]? data, IPen pen, bool bars = false, bool connect = true)
             {
                 if (data is not { Length: >= 2 }) return;
                 Point? previous = null;
@@ -202,6 +202,8 @@ public sealed class SpectrumGraphControl : FrequencyChartControl
                 {
                     var point = new Point(X(b, data.Length), DbToY(data[b]));
                     if (bars && data[b] > FloorDb) context.DrawLine(pen, new Point(point.X, plot.Bottom), point);
+                    else if (!bars && !connect)
+                        context.DrawLine(pen, new Point(point.X, point.Y - 0.5), new Point(point.X, point.Y + 0.5));
                     else if (!bars && previous is { } p) context.DrawLine(pen, p, point);
                     previous = point;
                 }
@@ -213,7 +215,8 @@ public sealed class SpectrumGraphControl : FrequencyChartControl
             }
             else if (InstantMagnitudesDb != null)
                 Curve(frame?.InstantDb ?? InstantMagnitudesDb, ShowPanoramaPhase ? DimInstantPen : InstantPen, true);
-            Curve(frame?.PeakDb ?? MagnitudesDb, SpectrumPen);
+            // SpectrumControl.java plots peak hold as one point per FFT bin, without connecting bins.
+            Curve(frame?.PeakDb ?? MagnitudesDb, SpectrumPen, connect: false);
             if (ShowPanoramaPhase && frame != null)
             {
                 double max = 0;
