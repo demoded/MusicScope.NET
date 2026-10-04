@@ -313,8 +313,9 @@ public partial class MainViewModel : ViewModelBase
                 return Task.CompletedTask;
             }, ct);
 
-            CurrentReport = engine.GenerateReport(TrackTitle, path, info.FormatName, info.Duration, info.BitDepth);
-            Dispatcher.UIThread.Post(() => UpdateFromReport(CurrentReport));
+            var report = engine.GenerateReport(TrackTitle, path, info.FormatName, info.Duration, info.BitDepth);
+            CurrentReport = report;
+            await Dispatcher.UIThread.InvokeAsync(() => UpdateFromReport(report));
         }
         catch (OperationCanceledException) { }
         catch (Exception ex)

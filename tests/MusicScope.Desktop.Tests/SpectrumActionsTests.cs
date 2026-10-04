@@ -106,11 +106,19 @@ public class SpectrumActionsTests
     {
         string path = Path.GetFullPath(Path.Combine(AppContext.BaseDirectory, "../../../../../TestAudioSamples/07_Sweep_10kHz_22.5kHz_-60dBFS_48k_24bit.wav"));
         var vm = new MainViewModel();
+        bool instantaneousSpectrumWasClearedBeforeAnalysisFinished = false;
+        vm.PropertyChanged += (_, args) =>
+        {
+            if (args.PropertyName == nameof(vm.IsAnalyzing) && !vm.IsAnalyzing)
+                instantaneousSpectrumWasClearedBeforeAnalysisFinished = vm.InstantSpectrumMagnitudes is null;
+        };
         var window = new MainWindow { DataContext = vm };
         window.Show();
         try
         {
             await vm.AnalyzeFileAsync(path);
+            Assert.True(instantaneousSpectrumWasClearedBeforeAnalysisFinished,
+                "The report spectrum must replace realtime bars before analysis is marked complete.");
             Dispatcher.UIThread.RunJobs();
             Assert.NotNull(vm.CurrentReport);
             var chart = window.GetVisualDescendants().OfType<SpectrumGraphControl>().Single();
