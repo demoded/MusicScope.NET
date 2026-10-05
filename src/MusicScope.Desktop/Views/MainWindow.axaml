@@ -145,7 +145,8 @@
 
                     <!-- Row 2: 2D Waterfall / Spectrogram Heatmap -->
                     <Border Grid.Row="2" Background="#000000">
-                        <ctrl:WaterfallControl LatestSpectrum="{Binding InstantSpectrumMagnitudes}"
+                        <ctrl:WaterfallControl BitDepth="{Binding BitDepth}"
+                                               LatestSpectrum="{Binding InstantSpectrumMagnitudes}"
                                                HoverFrequency="{Binding HoverFrequency, Mode=TwoWay}"
                                                SpectrogramMax="{Binding SpectrogramMax}"
                                                SpectrogramAvg="{Binding SpectrogramAvg}"

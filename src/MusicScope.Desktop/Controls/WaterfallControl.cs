@@ -34,6 +34,15 @@ public sealed class WaterfallControl : FrequencyChartControl
     public static readonly StyledProperty<int[]?> SpectrogramRowCountProperty =
         AvaloniaProperty.Register<WaterfallControl, int[]?>(nameof(SpectrogramRowCount));
 
+    public static readonly StyledProperty<int> BitDepthProperty =
+        AvaloniaProperty.Register<WaterfallControl, int>(nameof(BitDepth), 16);
+
+    public int BitDepth
+    {
+        get => GetValue(BitDepthProperty);
+        set => SetValue(BitDepthProperty, value);
+    }
+
     public static readonly StyledProperty<double> TrackProgressProperty =
         AvaloniaProperty.Register<WaterfallControl, double>(nameof(TrackProgress), 0.0);
 
@@ -223,6 +232,13 @@ public sealed class WaterfallControl : FrequencyChartControl
         _lastRenderedRow = -1;
     }
 
+    internal static double GetColorIntensity(float magnitude, int bitDepth)
+    {
+        double gain = bitDepth == 16 ? 6000.0 : 1_000_000.0;
+        double scale = bitDepth == 16 ? 70.4 : 42.9;
+        return scale * Math.Log10(magnitude * gain + 1.0);
+    }
+
     private void RebuildBitmap()
     {
         float[]? srcMax = SpectrogramMax;
@@ -260,7 +276,7 @@ public sealed class WaterfallControl : FrequencyChartControl
                         };
                     }
 
-                    double d = 70.4 * Math.Log10(mag * 6000.0 + 1.0);
+                    double d = GetColorIntensity(mag, BitDepth);
                     uint color = ColormapMode switch
                     {
                         0 => PaletteMon[Math.Clamp((int)d, 0, 255)],
@@ -280,7 +296,7 @@ public sealed class WaterfallControl : FrequencyChartControl
         if (change.Property == SpectrogramMaxProperty ||
             change.Property == SpectrogramAvgProperty ||
             change.Property == SpectrogramMinProperty ||
-            change.Property == SpectrogramRowCountProperty)
+            change.Property == SpectrogramRowCountProperty || change.Property == BitDepthProperty)
         {
             RebuildBitmap();
             InvalidateVisual();
@@ -292,7 +308,7 @@ public sealed class WaterfallControl : FrequencyChartControl
         AffectsRender<WaterfallControl>(
             LatestSpectrumProperty, SpectrogramMaxProperty, SpectrogramAvgProperty,
             SpectrogramMinProperty, SpectrogramRowCountProperty, TrackProgressProperty,
-            SampleRateProperty, CutoffFrequencyHzProperty, AggregationModeProperty,
+            SampleRateProperty, CutoffFrequencyHzProperty, AggregationModeProperty, BitDepthProperty,
             ColormapModeProperty, ShowCutOffFrequencyProperty);
     }
 
@@ -412,7 +428,7 @@ public sealed class WaterfallControl : FrequencyChartControl
                                     _ => srcMax[rowOffset + c]
                                 };
 
-                                double d = 70.4 * Math.Log10(mag * 6000.0 + 1.0);
+                                double d = GetColorIntensity(mag, BitDepth);
                                 uint color = ColormapMode switch
                                 {
                                     0 => PaletteMon[Math.Clamp((int)d, 0, 255)],
