@@ -105,10 +105,16 @@ public sealed class AudioAnalysisEngine
             float left = interleavedSamples[sampleIdx];
             float right = _channelCount >= 2 ? interleavedSamples[sampleIdx + 1] : left;
 
-            _ringBufferLeft[_ringBufferPos] = left;
-            _ringBufferRight[_ringBufferPos] = right;
-            _ringBufferPos = (_ringBufferPos + 1) % FftSize;
-            _bufferedFrames++;
+            // SpectrumModule.java caps each 50 ms block to its first FFT-sized window.
+            // At 96 kHz this retains frames 0..2047, rather than replacing them with
+            // frames 2752..4799, which produces different transient peak holds.
+            if (_framesSinceLastFft < FftSize)
+            {
+                _ringBufferLeft[_ringBufferPos] = left;
+                _ringBufferRight[_ringBufferPos] = right;
+                _ringBufferPos = (_ringBufferPos + 1) % FftSize;
+                _bufferedFrames++;
+            }
             _framesSinceLastFft++;
 
             if (_bufferedFrames >= FftSize && _framesSinceLastFft >= _fftStride)
@@ -253,7 +259,9 @@ public sealed class AudioAnalysisEngine
             _fftImagBufferLeft.AsSpan().CopyTo(_fftImagBufferRight);
         }
         else _fft.Forward(_fftRealBufferRight, _fftImagBufferRight);
-        _linearSpectrum.Update(_fftRealBufferLeft, _fftImagBufferLeft, _fftRealBufferRight, _fftImagBufferRight);
+        // The reference fills its ring on the first interval and starts smoothing on the next.
+        if (_spectrumFftCount > 0)
+            _linearSpectrum.Update(_fftRealBufferLeft, _fftImagBufferLeft, _fftRealBufferRight, _fftImagBufferRight);
 
         // Determine row in 250-row spectrogram
         // matching MusicScope WaterfallControl.java lines 344-350
