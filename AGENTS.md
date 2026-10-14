@@ -132,10 +132,23 @@ The extractor preserves the native 16, 32, 48, 64, 128, and 256 pixel Windows ic
 
 To build, package, hash, and publish a full multi-platform release for all 6 supported architectures (`win-x64`, `win-arm64`, `osx-x64`, `osx-arm64`, `linux-x64`, `linux-arm64`):
 
-#### 1. Publish All Target Platforms
+#### 1. Pre-Release Verification & Clean Build Environment
+Always verify the full test suite in Release mode before packaging, and start with a clean `dist/` directory to prevent stale files:
 
 ```pwsh
-$ReleaseVersion = "1.0.0"
+# Run full test suite in Release mode
+dotnet test MusicScope.slnx -c Release
+
+# Remove stale build outputs
+Remove-Item -Recurse -Force dist -ErrorAction SilentlyContinue
+```
+
+#### 2. Publish All Target Platforms
+
+Use PowerShell 7 (`pwsh`) to run the packaging helper for each target architecture:
+
+```pwsh
+$ReleaseVersion = "1.2.0"
 $Version = "v$ReleaseVersion"
 $RIDs = @("win-x64", "win-arm64", "osx-x64", "osx-arm64", "linux-x64", "linux-arm64")
 foreach ($rid in $RIDs) {
@@ -143,9 +156,9 @@ foreach ($rid in $RIDs) {
 }
 ```
 
-#### 2. Verify Single-File Output
+#### 3. Verify Single-File Output
 
-The helper removes standalone PDBs. Verify that no loose managed/native libraries or debugging symbols remain in the six distribution folders, including the nested macOS bundles:
+The publish helper removes standalone PDBs. Verify that no loose managed/native libraries or debugging symbols remain across any of the six distribution folders, including inside nested macOS bundles:
 
 ```pwsh
 foreach ($rid in $RIDs) {
@@ -155,44 +168,31 @@ foreach ($rid in $RIDs) {
 }
 ```
 
-#### 3. Package Distribution Archives
+#### 4. Package Distribution Archives
 
-Run each platform's packaging commands from the repository root on the indicated host. If using a separate shell or machine, set `$Version` to the same release tag (for example, `v1.0.0`) and copy the published folders there first.
-
-Windows, using PowerShell 7:
+Package all six platforms into `dist/release/`. On a Windows build machine, PowerShell 7 and the built-in Windows `tar.exe` (`bsdtar`) can generate all 6 platform archives:
 
 ```pwsh
 New-Item -ItemType Directory -Force -Path dist/release | Out-Null
 
+# Windows (ZIP containing single-file MusicScope.NET.exe)
 Compress-Archive -Path dist/win-x64/* -DestinationPath "dist/release/MusicScope.NET-$Version-win-x64.zip" -Force
 Compress-Archive -Path dist/win-arm64/* -DestinationPath "dist/release/MusicScope.NET-$Version-win-arm64.zip" -Force
-```
 
-macOS, using PowerShell 7 and `ditto` to preserve the `.app` bundle and executable permissions:
+# macOS (ZIP containing MusicScope.NET.app bundle)
+Compress-Archive -Path dist/osx-x64/* -DestinationPath "dist/release/MusicScope.NET-$Version-osx-x64.zip" -Force
+Compress-Archive -Path dist/osx-arm64/* -DestinationPath "dist/release/MusicScope.NET-$Version-osx-arm64.zip" -Force
 
-```pwsh
-New-Item -ItemType Directory -Force -Path dist/release | Out-Null
-
-chmod +x dist/osx-x64/MusicScope.NET.app/Contents/MacOS/MusicScope.NET
-chmod +x dist/osx-arm64/MusicScope.NET.app/Contents/MacOS/MusicScope.NET
-ditto -c -k --sequesterRsrc --keepParent dist/osx-x64/MusicScope.NET.app "dist/release/MusicScope.NET-$Version-osx-x64.zip"
-ditto -c -k --sequesterRsrc --keepParent dist/osx-arm64/MusicScope.NET.app "dist/release/MusicScope.NET-$Version-osx-arm64.zip"
-```
-
-Linux, using PowerShell 7 and `tar` to preserve executable permissions:
-
-```pwsh
-New-Item -ItemType Directory -Force -Path dist/release | Out-Null
-
-chmod +x dist/linux-x64/MusicScope.NET
-chmod +x dist/linux-arm64/MusicScope.NET
+# Linux (TAR.GZ preserving launcher scripts and icon assets)
 tar -czf "dist/release/MusicScope.NET-$Version-linux-x64.tar.gz" -C dist/linux-x64 .
 tar -czf "dist/release/MusicScope.NET-$Version-linux-arm64.tar.gz" -C dist/linux-arm64 .
 ```
 
-#### 4. Generate SHA-256 Checksums
+*(Note: When packaging natively on macOS, `ditto -c -k --sequesterRsrc --keepParent dist/$rid/MusicScope.NET.app "dist/release/MusicScope.NET-$Version-$rid.zip"` can be used to preserve resource forks. When packaging on Linux, verify `chmod +x` on the executable before creating the tarball).*
 
-Collect all six archives in `dist/release/` before hashing:
+#### 5. Generate SHA-256 Checksums
+
+Collect and hash all six archives in `dist/release/`:
 
 ```pwsh
 Get-ChildItem -LiteralPath dist/release -File |
@@ -203,9 +203,52 @@ Get-ChildItem -LiteralPath dist/release -File |
     Set-Content -Encoding utf8NoBOM dist/release/SHA256SUMS.txt
 ```
 
-#### 5. Tag and Publish GitHub Release
+#### 6. Compose Release Notes (`dist/release/RELEASE_NOTES.md`)
 
-Write `dist/release/RELEASE_NOTES.md` and verify the packaged applications on their target platforms before publishing. Tag the commit containing the release changes:
+Compose structured release notes summarizing changes from merged PRs. Follow this standard format:
+
+```markdown
+# MusicScope.NET v<Version>
+
+Brief overview of the release theme, major improvements, and reference parity accomplishments. Application and bundle versions are **<Version>**.
+
+## Changes
+
+### <Change Area Title> ([PR #<Number>](https://github.com/demoded/MusicScope.NET/pull/<Number>))
+Detailed summary of the change:
+- Problem or original XiVero parity discrepancy addressed.
+- Solution details (DSP mathematical alignment, rendering adjustments, UI thread handling).
+- Validation and regression metrics (e.g. dB differences, sample rates tested).
+- Mention closed issues (`Fixes #<Number>` or `Resolves issue #<Number>`).
+
+## Downloads and installation
+
+Choose the archive matching your operating system and CPU:
+
+| Platform | x64 | ARM64 |
+| --- | --- | --- |
+| Windows | [ZIP](https://github.com/demoded/MusicScope.NET/releases/download/<VersionTag>/MusicScope.NET-<VersionTag>-win-x64.zip) | [ZIP](https://github.com/demoded/MusicScope.NET/releases/download/<VersionTag>/MusicScope.NET-<VersionTag>-win-arm64.zip) |
+| macOS | [ZIP](https://github.com/demoded/MusicScope.NET/releases/download/<VersionTag>/MusicScope.NET-<VersionTag>-osx-x64.zip) | [ZIP](https://github.com/demoded/MusicScope.NET/releases/download/<VersionTag>/MusicScope.NET-<VersionTag>-osx-arm64.zip) |
+| Linux | [TAR.GZ](https://github.com/demoded/MusicScope.NET/releases/download/<VersionTag>/MusicScope.NET-<VersionTag>-linux-x64.tar.gz) | [TAR.GZ](https://github.com/demoded/MusicScope.NET/releases/download/<VersionTag>/MusicScope.NET-<VersionTag>-linux-arm64.tar.gz) |
+
+These packages are self-contained single-file releases including the .NET runtime. **FFmpeg is still required** in `PATH` or beside the executable for audio file decoding.
+
+- **Windows:** extract the ZIP and run `MusicScope.NET.exe`. (If SmartScreen warns on first run, click **More info** -> **Run anyway**, or unblock the archive in File Properties).
+- **macOS:** extract the ZIP, copy `MusicScope.NET.app` to Applications, and launch the bundle. The application is unsigned and not notarized (right-click -> **Open**, or go to **System Settings > Privacy & Security > Open Anyway**).
+- **Linux:** extract to a permanent location and run `sh ./install-desktop-entry.sh` there to install the launcher and icons for the current user. Run the installer again after moving the application.
+
+Verify downloads against [SHA256SUMS.txt](https://github.com/demoded/MusicScope.NET/releases/download/<VersionTag>/SHA256SUMS.txt).
+
+## Validation
+
+Release solution build completed with zero warnings or errors; all **<Total>** tests passed (<CoreCount> Core, <DesktopCount> Desktop). All six single-file platform packages were verified for absence of loose libraries or standalone PDB symbols, correct bundle structure, and valid checksums.
+
+[Full changelog](https://github.com/demoded/MusicScope.NET/compare/<PreviousTag>...<VersionTag>)
+```
+
+#### 7. Tag and Publish GitHub Release
+
+Create and push the git tag, then publish the release with assets using the GitHub CLI:
 
 ```pwsh
 # 1. Create and push git tag
@@ -221,7 +264,7 @@ gh release create $Version `
     dist/release/MusicScope.NET-$Version-linux-x64.tar.gz `
     dist/release/MusicScope.NET-$Version-linux-arm64.tar.gz `
     dist/release/SHA256SUMS.txt `
-    --title "$Version - Cross-Platform Release" `
+    --title "$Version - <Highlights>" `
     --notes-file dist/release/RELEASE_NOTES.md
 ```
 
