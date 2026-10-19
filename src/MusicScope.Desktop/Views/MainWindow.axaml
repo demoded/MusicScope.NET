@@ -72,6 +72,7 @@
                         <Border Grid.Column="0" BorderBrush="#1C2127" BorderThickness="0,0,1,1" Background="#000000">
                             <ctrl:FormatBoxControl FormatName="{Binding FormatName}"
                                                    SampleRate="{Binding SampleRate}"
+                                                   ContainerSampleRate="{Binding ContainerSampleRate}"
                                                    BitDepth="{Binding BitDepth}"
                                                    IsDsd="{Binding IsDsd}"/>
                         </Border>

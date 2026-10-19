@@ -25,6 +25,9 @@ public sealed class FormatBoxControl : Control
     public static readonly StyledProperty<bool> IsDsdProperty =
         AvaloniaProperty.Register<FormatBoxControl, bool>(nameof(IsDsd), false);
 
+    public static readonly StyledProperty<double> ContainerSampleRateProperty =
+        AvaloniaProperty.Register<FormatBoxControl, double>(nameof(ContainerSampleRate), 0.0);
+
     public string FormatName
     {
         get => GetValue(FormatNameProperty);
@@ -35,6 +38,12 @@ public sealed class FormatBoxControl : Control
     {
         get => GetValue(SampleRateProperty);
         set => SetValue(SampleRateProperty, value);
+    }
+
+    public double ContainerSampleRate
+    {
+        get => GetValue(ContainerSampleRateProperty);
+        set => SetValue(ContainerSampleRateProperty, value);
     }
 
     public int BitDepth
@@ -56,7 +65,7 @@ public sealed class FormatBoxControl : Control
 
     static FormatBoxControl()
     {
-        AffectsRender<FormatBoxControl>(FormatNameProperty, SampleRateProperty, BitDepthProperty, IsDsdProperty);
+        AffectsRender<FormatBoxControl>(FormatNameProperty, SampleRateProperty, ContainerSampleRateProperty, BitDepthProperty, IsDsdProperty);
     }
 
     public override void Render(DrawingContext context)
@@ -98,7 +107,7 @@ public sealed class FormatBoxControl : Control
         y += 6;
 
         // 4. Sample Rates (2 columns)
-        double sr = SampleRate;
+        double sr = ContainerSampleRate > 0 ? ContainerSampleRate : SampleRate;
         double srKhz = sr / 1000.0;
 
         DrawRate(context, "44.1", Math.Abs(srKhz - 44.1) < 0.2, tf, left, y);
