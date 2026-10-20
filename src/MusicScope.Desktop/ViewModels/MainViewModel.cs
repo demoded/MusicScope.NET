@@ -185,6 +185,9 @@ public partial class MainViewModel : ViewModelBase
     [ObservableProperty]
     private double _sampleRate = 44100.0;
 
+    [ObservableProperty]
+    private double _containerSampleRate = 44100.0;
+
     // DAW Server
     [ObservableProperty]
     private bool _isDawServerRunning;
@@ -215,7 +218,7 @@ public partial class MainViewModel : ViewModelBase
 
     public MainViewModel()
     {
-        _decoder = new FfmpegAudioDecoder();
+        _decoder = new UniversalAudioDecoder();
         _dawServer = new DawSocketServer();
 
         _dawServer.ConnectionStateChanged += (s, connected) =>
@@ -286,11 +289,14 @@ public partial class MainViewModel : ViewModelBase
         try
         {
             var info = await _decoder.ProbeAsync(path, ct);
-            FormatDetails = $"{info.FormatName} | {info.SampleRate:0} Hz | {info.ChannelCount} Channels | {info.BitDepth}-bit | {info.Duration:mm\\:ss}";
+            double displayRate = info.ContainerSampleRate > 0 ? info.ContainerSampleRate : info.SampleRate;
+            FormatDetails = $"{info.FormatName} | {displayRate:0} Hz | {info.ChannelCount} Channels | {info.BitDepth}-bit | {info.Duration:mm\\:ss}";
             SampleRate = info.SampleRate;
+            ContainerSampleRate = displayRate;
             FormatName = info.FormatName;
             BitDepth = info.BitDepth;
-            IsDsd = info.FormatName.Contains("DSD", StringComparison.OrdinalIgnoreCase) ||
+            IsDsd = info.IsDsd ||
+                    info.FormatName.Contains("DSD", StringComparison.OrdinalIgnoreCase) ||
                     info.FormatName.Contains("DSF", StringComparison.OrdinalIgnoreCase) ||
                     info.FormatName.Contains("DFF", StringComparison.OrdinalIgnoreCase);
 
