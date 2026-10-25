@@ -31,6 +31,15 @@ public sealed class WaterfallControl : FrequencyChartControl
     public static readonly StyledProperty<float[]?> SpectrogramMinProperty =
         AvaloniaProperty.Register<WaterfallControl, float[]?>(nameof(SpectrogramMin));
 
+    public static readonly StyledProperty<float[]?> SpectrogramLogMaxProperty =
+        AvaloniaProperty.Register<WaterfallControl, float[]?>(nameof(SpectrogramLogMax));
+
+    public static readonly StyledProperty<float[]?> SpectrogramLogAvgProperty =
+        AvaloniaProperty.Register<WaterfallControl, float[]?>(nameof(SpectrogramLogAvg));
+
+    public static readonly StyledProperty<float[]?> SpectrogramLogMinProperty =
+        AvaloniaProperty.Register<WaterfallControl, float[]?>(nameof(SpectrogramLogMin));
+
     public static readonly StyledProperty<int[]?> SpectrogramRowCountProperty =
         AvaloniaProperty.Register<WaterfallControl, int[]?>(nameof(SpectrogramRowCount));
 
@@ -82,6 +91,24 @@ public sealed class WaterfallControl : FrequencyChartControl
         set => SetValue(SpectrogramMinProperty, value);
     }
 
+    public float[]? SpectrogramLogMax
+    {
+        get => GetValue(SpectrogramLogMaxProperty);
+        set => SetValue(SpectrogramLogMaxProperty, value);
+    }
+
+    public float[]? SpectrogramLogAvg
+    {
+        get => GetValue(SpectrogramLogAvgProperty);
+        set => SetValue(SpectrogramLogAvgProperty, value);
+    }
+
+    public float[]? SpectrogramLogMin
+    {
+        get => GetValue(SpectrogramLogMinProperty);
+        set => SetValue(SpectrogramLogMinProperty, value);
+    }
+
     public int[]? SpectrogramRowCount
     {
         get => GetValue(SpectrogramRowCountProperty);
@@ -103,8 +130,14 @@ public sealed class WaterfallControl : FrequencyChartControl
         int row = Math.Clamp((int)((position.Y - plot.Y) / plot.Height * BitmapHeight), 0, BitmapHeight - 1);
         string name = AggregationMode switch { 1 => "AVG", 2 => "MIN", _ => "MAX" };
         int count = SpectrogramRowCount is { } counts && row < counts.Length ? counts[row] : 0;
-        float[]? values = AggregationMode switch { 1 => SpectrogramAvg, 2 => SpectrogramMin, _ => SpectrogramMax };
-        int srcCol = IsLogarithmic ? LogColumnMap[column] : column;
+        bool useLogBuffer = IsLogarithmic && SpectrogramLogMax != null;
+        float[]? values = AggregationMode switch
+        {
+            1 => useLogBuffer ? (SpectrogramLogAvg ?? SpectrogramLogMax) : SpectrogramAvg,
+            2 => useLogBuffer ? (SpectrogramLogMin ?? SpectrogramLogMax) : SpectrogramMin,
+            _ => useLogBuffer ? SpectrogramLogMax : SpectrogramMax
+        };
+        int srcCol = (IsLogarithmic && !useLogBuffer) ? LogColumnMap[column] : column;
         int index = row * BitmapWidth + srcCol;
         if (count <= 0 || values == null || index >= values.Length) return (null, null, name);
 
@@ -260,9 +293,10 @@ public sealed class WaterfallControl : FrequencyChartControl
 
     private void RebuildBitmap()
     {
-        float[]? srcMax = SpectrogramMax;
-        float[]? srcAvg = SpectrogramAvg;
-        float[]? srcMin = SpectrogramMin;
+        bool useLogBuffer = IsLogarithmic && SpectrogramLogMax != null;
+        float[]? srcMax = useLogBuffer ? SpectrogramLogMax : SpectrogramMax;
+        float[]? srcAvg = useLogBuffer ? (SpectrogramLogAvg ?? SpectrogramLogMax) : SpectrogramAvg;
+        float[]? srcMin = useLogBuffer ? (SpectrogramLogMin ?? SpectrogramLogMax) : SpectrogramMin;
         int[]? rowCounts = SpectrogramRowCount;
 
         using var fb = _bitmap.Lock();
@@ -284,7 +318,7 @@ public sealed class WaterfallControl : FrequencyChartControl
                 int rowOffset = r * BitmapWidth;
                 for (int c = 0; c < BitmapWidth; c++)
                 {
-                    int srcCol = IsLogarithmic ? LogColumnMap[c] : c;
+                    int srcCol = (IsLogarithmic && !useLogBuffer) ? LogColumnMap[c] : c;
                     int srcIdx = rowOffset + srcCol;
                     float mag = 0f;
                     if (srcMax != null && srcAvg != null && srcMin != null && srcIdx < srcMax.Length)
@@ -317,6 +351,9 @@ public sealed class WaterfallControl : FrequencyChartControl
         if (change.Property == SpectrogramMaxProperty ||
             change.Property == SpectrogramAvgProperty ||
             change.Property == SpectrogramMinProperty ||
+            change.Property == SpectrogramLogMaxProperty ||
+            change.Property == SpectrogramLogAvgProperty ||
+            change.Property == SpectrogramLogMinProperty ||
             change.Property == SpectrogramRowCountProperty ||
             change.Property == BitDepthProperty ||
             change.Property == IsLogarithmicProperty)
@@ -331,7 +368,8 @@ public sealed class WaterfallControl : FrequencyChartControl
     {
         AffectsRender<WaterfallControl>(
             LatestSpectrumProperty, SpectrogramMaxProperty, SpectrogramAvgProperty,
-            SpectrogramMinProperty, SpectrogramRowCountProperty, TrackProgressProperty,
+            SpectrogramMinProperty, SpectrogramLogMaxProperty, SpectrogramLogAvgProperty,
+            SpectrogramLogMinProperty, SpectrogramRowCountProperty, TrackProgressProperty,
             SampleRateProperty, CutoffFrequencyHzProperty, AggregationModeProperty, BitDepthProperty,
             ColormapModeProperty, ShowCutOffFrequencyProperty, IsLogarithmicProperty);
     }
@@ -416,9 +454,10 @@ public sealed class WaterfallControl : FrequencyChartControl
         }
 
         // Render newest rows into bitmap based on Spectrogram buffers & TrackProgress
-        float[]? srcMax = SpectrogramMax;
-        float[]? srcAvg = SpectrogramAvg;
-        float[]? srcMin = SpectrogramMin;
+        bool useLogBuffer = IsLogarithmic && SpectrogramLogMax != null;
+        float[]? srcMax = useLogBuffer ? SpectrogramLogMax : SpectrogramMax;
+        float[]? srcAvg = useLogBuffer ? (SpectrogramLogAvg ?? SpectrogramLogMax) : SpectrogramAvg;
+        float[]? srcMin = useLogBuffer ? (SpectrogramLogMin ?? SpectrogramLogMax) : SpectrogramMin;
         int[]? rowCounts = SpectrogramRowCount;
 
         if (srcMax != null && srcAvg != null && srcMin != null && rowCounts != null)
@@ -445,7 +484,7 @@ public sealed class WaterfallControl : FrequencyChartControl
                             int rowOffset = r * BitmapWidth;
                             for (int c = 0; c < BitmapWidth; c++)
                             {
-                                int srcCol = IsLogarithmic ? LogColumnMap[c] : c;
+                                int srcCol = (IsLogarithmic && !useLogBuffer) ? LogColumnMap[c] : c;
                                 int srcIdx = rowOffset + srcCol;
                                 float mag = AggregationMode switch
                                 {

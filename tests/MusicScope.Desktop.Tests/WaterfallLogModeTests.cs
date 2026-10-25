@@ -117,6 +117,57 @@ public class WaterfallLogModeTests
     }
 
     [AvaloniaFact]
+    public void Waterfall_GetLevels_UsesHighResolutionLogSpectrogramWhenAvailable()
+    {
+        var waterfall = new WaterfallControl
+        {
+            SampleRate = 48000.0,
+            Width = 1072,
+            Height = 260
+        };
+
+        // Linear buffer has silence everywhere
+        float[] specMax = new float[WaterfallControl.BitmapWidth * WaterfallControl.BitmapHeight];
+        // High-res log buffer has a discrete peak specifically at column 512
+        float[] specLogMax = new float[WaterfallControl.BitmapWidth * WaterfallControl.BitmapHeight];
+        specLogMax[512] = 1.0f; // 0 dBFS peak at column 512 in log space
+
+        int[] rowCounts = new int[WaterfallControl.BitmapHeight];
+        rowCounts[0] = 1;
+
+        waterfall.SpectrogramMax = specMax;
+        waterfall.SpectrogramAvg = specMax;
+        waterfall.SpectrogramMin = specMax;
+        waterfall.SpectrogramLogMax = specLogMax;
+        waterfall.SpectrogramLogAvg = specLogMax;
+        waterfall.SpectrogramLogMin = specLogMax;
+        waterfall.SpectrogramRowCount = rowCounts;
+        waterfall.TrackProgress = 1.0;
+
+        var window = new Window { Width = 1072, Height = 260, Content = waterfall };
+        window.Show();
+        try
+        {
+            var ptMiddle = new Point(38 + 512, 6);
+
+            // In linear mode: uses SpectrogramMax, which is silent at 512
+            waterfall.IsLogarithmic = false;
+            var (lvlLinear, _, _) = waterfall.GetLevels(ptMiddle);
+            Assert.True(lvlLinear == null || double.IsNegativeInfinity(lvlLinear.Value) || lvlLinear.Value < -100);
+
+            // In log mode: uses SpectrogramLogMax directly at column 512 without 1024-bin decimation/remapping
+            waterfall.IsLogarithmic = true;
+            var (lvlLog, _, _) = waterfall.GetLevels(ptMiddle);
+            Assert.NotNull(lvlLog);
+            Assert.Equal(0.0, lvlLog.Value, tolerance: 0.1);
+        }
+        finally
+        {
+            window.Close();
+        }
+    }
+
+    [AvaloniaFact]
     public void MainWindow_TwoWayBinding_TogglesLogModeAcrossBothControls()
     {
         var vm = new MainViewModel { SampleRate = 48000 };

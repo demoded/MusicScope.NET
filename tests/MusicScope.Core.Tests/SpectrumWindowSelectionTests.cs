@@ -66,6 +66,9 @@ public class SpectrumWindowSelectionTests
         Assert.Equal(report.SpectrogramMax, other.SpectrogramMax);
         Assert.Equal(report.SpectrogramAvg, other.SpectrogramAvg);
         Assert.Equal(report.SpectrogramMin, other.SpectrogramMin);
+        Assert.Equal(report.SpectrogramLogMax, other.SpectrogramLogMax);
+        Assert.Equal(report.SpectrogramLogAvg, other.SpectrogramLogAvg);
+        Assert.Equal(report.SpectrogramLogMin, other.SpectrogramLogMin);
     }
 
     [Theory]

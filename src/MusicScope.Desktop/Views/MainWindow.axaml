@@ -154,6 +154,9 @@
                                                SpectrogramMax="{Binding SpectrogramMax}"
                                                SpectrogramAvg="{Binding SpectrogramAvg}"
                                                SpectrogramMin="{Binding SpectrogramMin}"
+                                               SpectrogramLogMax="{Binding SpectrogramLogMax}"
+                                               SpectrogramLogAvg="{Binding SpectrogramLogAvg}"
+                                               SpectrogramLogMin="{Binding SpectrogramLogMin}"
                                                SpectrogramRowCount="{Binding SpectrogramRowCount}"
                                                TrackProgress="{Binding TrackProgress}"
                                                SampleRate="{Binding SampleRate}"/>
