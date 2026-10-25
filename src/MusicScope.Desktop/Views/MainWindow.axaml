@@ -140,6 +140,7 @@
                                                    LogSpectrum="{Binding LogSpectrum}"
                                                    BitDepth="{Binding BitDepth}"
                                                    HoverFrequency="{Binding HoverFrequency, Mode=TwoWay}"
+                                                   IsLogarithmic="{Binding IsLogarithmic, Mode=TwoWay}"
                                                    InstantMagnitudesDb="{Binding InstantSpectrumMagnitudes}"
                                                    SampleRate="{Binding SampleRate}"/>
                     </Border>
@@ -149,6 +150,7 @@
                         <ctrl:WaterfallControl BitDepth="{Binding BitDepth}"
                                                LatestSpectrum="{Binding InstantSpectrumMagnitudes}"
                                                HoverFrequency="{Binding HoverFrequency, Mode=TwoWay}"
+                                               IsLogarithmic="{Binding IsLogarithmic, Mode=TwoWay}"
                                                SpectrogramMax="{Binding SpectrogramMax}"
                                                SpectrogramAvg="{Binding SpectrogramAvg}"
                                                SpectrogramMin="{Binding SpectrogramMin}"

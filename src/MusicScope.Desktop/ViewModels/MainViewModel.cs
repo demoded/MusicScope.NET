@@ -38,6 +38,9 @@ public partial class MainViewModel : ViewModelBase
     [ObservableProperty]
     private double? _hoverFrequency;
 
+    [ObservableProperty]
+    private bool _isLogarithmic;
+
     // MusicScope Format Matrix
     [ObservableProperty]
     private string _formatName = "FLAC";

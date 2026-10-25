@@ -96,7 +96,7 @@ public sealed class WaterfallControl : FrequencyChartControl
 
     protected override Rect PlotBounds => new(38, 6, Math.Max(0, Bounds.Width - 48), Math.Max(0, Bounds.Height - 10));
 
-    protected override (double? LevelDb, double? CursorDb, string LevelName) GetLevels(Point position)
+    protected internal override (double? LevelDb, double? CursorDb, string LevelName) GetLevels(Point position)
     {
         Rect plot = PlotBounds;
         int column = Math.Clamp((int)((position.X - plot.X) / plot.Width * BitmapWidth), 0, BitmapWidth - 1);
@@ -104,7 +104,8 @@ public sealed class WaterfallControl : FrequencyChartControl
         string name = AggregationMode switch { 1 => "AVG", 2 => "MIN", _ => "MAX" };
         int count = SpectrogramRowCount is { } counts && row < counts.Length ? counts[row] : 0;
         float[]? values = AggregationMode switch { 1 => SpectrogramAvg, 2 => SpectrogramMin, _ => SpectrogramMax };
-        int index = row * BitmapWidth + column;
+        int srcCol = IsLogarithmic ? LogColumnMap[column] : column;
+        int index = row * BitmapWidth + srcCol;
         if (count <= 0 || values == null || index >= values.Length) return (null, null, name);
 
         double magnitude = values[index];
@@ -141,6 +142,24 @@ public sealed class WaterfallControl : FrequencyChartControl
     public const int BitmapHeight = 250;
     private readonly WriteableBitmap _bitmap;
     private int _lastRenderedRow = -1;
+
+    // Precomputed 1024-column mapping table for logarithmic frequency distribution.
+    // Matches original XiVero WaterfallControl.java log mapping:
+    //   StreamDecoder = 1024 / log10(4096 * 0.005 + 1) = 1024 / log10(21.48)
+    //   bin = (10^(c / StreamDecoder) - 1) / 0.005 = (21.48^(c / 1024) - 1) / 20.48 * 1024
+    internal static readonly int[] LogColumnMap = InitializeLogColumnMap();
+
+    private static int[] InitializeLogColumnMap()
+    {
+        int[] map = new int[BitmapWidth];
+        for (int c = 0; c < BitmapWidth; c++)
+        {
+            double frac = (double)c / BitmapWidth;
+            double linFrac = (Math.Pow(21.48, frac) - 1.0) / 20.48;
+            map[c] = Math.Clamp((int)(linFrac * BitmapWidth), 0, BitmapWidth - 1);
+        }
+        return map;
+    }
 
     // Palettes matching original MusicScope Java WaterfallControl.java
     private static readonly uint[] PaletteMon = InitializeMonPalette();
@@ -265,14 +284,16 @@ public sealed class WaterfallControl : FrequencyChartControl
                 int rowOffset = r * BitmapWidth;
                 for (int c = 0; c < BitmapWidth; c++)
                 {
+                    int srcCol = IsLogarithmic ? LogColumnMap[c] : c;
+                    int srcIdx = rowOffset + srcCol;
                     float mag = 0f;
-                    if (srcMax != null && srcAvg != null && srcMin != null && (rowOffset + c) < srcMax.Length)
+                    if (srcMax != null && srcAvg != null && srcMin != null && srcIdx < srcMax.Length)
                     {
                         mag = AggregationMode switch
                         {
-                            1 => srcAvg[rowOffset + c] / count,
-                            2 => srcMin[rowOffset + c],
-                            _ => srcMax[rowOffset + c]
+                            1 => srcAvg[srcIdx] / count,
+                            2 => srcMin[srcIdx],
+                            _ => srcMax[srcIdx]
                         };
                     }
 
@@ -296,8 +317,11 @@ public sealed class WaterfallControl : FrequencyChartControl
         if (change.Property == SpectrogramMaxProperty ||
             change.Property == SpectrogramAvgProperty ||
             change.Property == SpectrogramMinProperty ||
-            change.Property == SpectrogramRowCountProperty || change.Property == BitDepthProperty)
+            change.Property == SpectrogramRowCountProperty ||
+            change.Property == BitDepthProperty ||
+            change.Property == IsLogarithmicProperty)
         {
+            _lastRenderedRow = -1;
             RebuildBitmap();
             InvalidateVisual();
         }
@@ -309,7 +333,7 @@ public sealed class WaterfallControl : FrequencyChartControl
             LatestSpectrumProperty, SpectrogramMaxProperty, SpectrogramAvgProperty,
             SpectrogramMinProperty, SpectrogramRowCountProperty, TrackProgressProperty,
             SampleRateProperty, CutoffFrequencyHzProperty, AggregationModeProperty, BitDepthProperty,
-            ColormapModeProperty, ShowCutOffFrequencyProperty);
+            ColormapModeProperty, ShowCutOffFrequencyProperty, IsLogarithmicProperty);
     }
 
     /// <summary>
@@ -421,11 +445,13 @@ public sealed class WaterfallControl : FrequencyChartControl
                             int rowOffset = r * BitmapWidth;
                             for (int c = 0; c < BitmapWidth; c++)
                             {
+                                int srcCol = IsLogarithmic ? LogColumnMap[c] : c;
+                                int srcIdx = rowOffset + srcCol;
                                 float mag = AggregationMode switch
                                 {
-                                    1 => srcAvg[rowOffset + c] / count,
-                                    2 => srcMin[rowOffset + c],
-                                    _ => srcMax[rowOffset + c]
+                                    1 => srcAvg[srcIdx] / count,
+                                    2 => srcMin[srcIdx],
+                                    _ => srcMax[srcIdx]
                                 };
 
                                 double d = GetColorIntensity(mag, BitDepth);
@@ -487,9 +513,8 @@ public sealed class WaterfallControl : FrequencyChartControl
         if (ShowCutOffFrequency)
         {
             double cutoffHz = CutoffFrequencyHz > 0 ? CutoffFrequencyHz : (SampleRate > 0 ? Math.Min(22050.0, SampleRate * 0.45) : 20000.0);
-            double nyquistHz = EffectiveSampleRate / 2.0;
-            double cofNorm = Math.Clamp(cutoffHz / nyquistHz, 0.0, 1.0);
-            double cofX = leftMargin + cofNorm * plotWidth;
+            double cofNorm = FrequencyToFraction(cutoffHz);
+            double cofX = leftMargin + Math.Clamp(cofNorm, 0.0, 1.0) * plotWidth;
 
             context.DrawLine(RedCutoffPen, new Point(cofX, 6), new Point(cofX, 6 + plotHeight));
         }

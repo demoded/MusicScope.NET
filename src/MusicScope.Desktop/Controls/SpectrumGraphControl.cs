@@ -28,8 +28,6 @@ public sealed class SpectrumGraphControl : FrequencyChartControl
         AvaloniaProperty.Register<SpectrumGraphControl, SpectrumFrame?>(nameof(LogSpectrum));
     public static readonly StyledProperty<int> BitDepthProperty =
         AvaloniaProperty.Register<SpectrumGraphControl, int>(nameof(BitDepth), 16);
-    public static readonly StyledProperty<bool> IsLogarithmicProperty =
-        AvaloniaProperty.Register<SpectrumGraphControl, bool>(nameof(IsLogarithmic));
     public static readonly StyledProperty<bool> ShowLeftRightProperty =
         AvaloniaProperty.Register<SpectrumGraphControl, bool>(nameof(ShowLeftRight));
     public static readonly StyledProperty<bool> ShowPanoramaPhaseProperty =
@@ -42,7 +40,6 @@ public sealed class SpectrumGraphControl : FrequencyChartControl
     public SpectrumFrame? LinearSpectrum { get => GetValue(LinearSpectrumProperty); set => SetValue(LinearSpectrumProperty, value); }
     public SpectrumFrame? LogSpectrum { get => GetValue(LogSpectrumProperty); set => SetValue(LogSpectrumProperty, value); }
     public int BitDepth { get => GetValue(BitDepthProperty); set => SetValue(BitDepthProperty, value); }
-    public bool IsLogarithmic { get => GetValue(IsLogarithmicProperty); set => SetValue(IsLogarithmicProperty, value); }
     public bool ShowLeftRight { get => GetValue(ShowLeftRightProperty); set => SetValue(ShowLeftRightProperty, value); }
     public bool ShowPanoramaPhase { get => GetValue(ShowPanoramaPhaseProperty); set => SetValue(ShowPanoramaPhaseProperty, value); }
     public bool ExtendedRange { get => GetValue(ExtendedRangeProperty); set => SetValue(ExtendedRangeProperty, value); }
@@ -52,19 +49,9 @@ public sealed class SpectrumGraphControl : FrequencyChartControl
     private double ScaleFactor => ExtendedRange ? 5e8 : BitDepth == 16 ? 3000 : 500000;
     protected override Rect PlotBounds => new(38, 16, Math.Max(0, Bounds.Width - 48), Math.Max(0, Bounds.Height - 52));
 
-    // SpectrumControl.java: default log curvature 0.005 with 4096 positive FFT bins.
-    protected override double FractionToFrequency(double fraction) => EffectiveSampleRate / 2 *
-        (IsLogarithmic ? (Math.Pow(21.48, fraction) - 1) / 20.48 : fraction);
-    protected override double FrequencyToFraction(double frequency)
-    {
-        double fraction = frequency / (EffectiveSampleRate / 2);
-        return IsLogarithmic ? Math.Log10(1 + 20.48 * fraction) / Math.Log10(21.48) : fraction;
-    }
-
     protected override void OnPropertyChanged(AvaloniaPropertyChangedEventArgs change)
     {
         base.OnPropertyChanged(change);
-        if (change.Property == IsLogarithmicProperty) UpdateHoverFrequency();
     }
 
     internal double DbToY(double db)
@@ -74,7 +61,7 @@ public sealed class SpectrumGraphControl : FrequencyChartControl
             Math.Log10(1 + ScaleFactor) * PlotBounds.Height;
     }
 
-    protected override (double? LevelDb, double? CursorDb, string LevelName) GetLevels(Point position)
+    protected internal override (double? LevelDb, double? CursorDb, string LevelName) GetLevels(Point position)
     {
         Rect plot = PlotBounds;
         double frequency = FractionToFrequency(Math.Clamp((position.X - plot.X) / plot.Width, 0, 1));
