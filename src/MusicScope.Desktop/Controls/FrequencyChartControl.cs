@@ -31,11 +31,28 @@ public abstract class FrequencyChartControl : Control
         set => SetValue(HoverFrequencyProperty, value);
     }
 
+    public static readonly StyledProperty<bool> IsLogarithmicProperty =
+        AvaloniaProperty.Register<FrequencyChartControl, bool>(nameof(IsLogarithmic), false);
+
+    public bool IsLogarithmic
+    {
+        get => GetValue(IsLogarithmicProperty);
+        set => SetValue(IsLogarithmicProperty, value);
+    }
+
     protected double EffectiveSampleRate => double.IsFinite(SampleRate) && SampleRate > 0 ? SampleRate : 44100.0;
     protected abstract Rect PlotBounds { get; }
-    protected abstract (double? LevelDb, double? CursorDb, string LevelName) GetLevels(Point position);
-    protected virtual double FractionToFrequency(double fraction) => fraction * EffectiveSampleRate / 2;
-    protected virtual double FrequencyToFraction(double frequency) => frequency / (EffectiveSampleRate / 2);
+    protected internal abstract (double? LevelDb, double? CursorDb, string LevelName) GetLevels(Point position);
+
+    // Default curvature matching original MusicScope XiVero (SpectrumControl.java and WaterfallControl.java: default log curvature 0.005 with 4096 positive FFT bins)
+    protected internal virtual double FractionToFrequency(double fraction) => EffectiveSampleRate / 2 *
+        (IsLogarithmic ? (Math.Pow(21.48, fraction) - 1.0) / 20.48 : fraction);
+
+    protected internal virtual double FrequencyToFraction(double frequency)
+    {
+        double fraction = frequency / (EffectiveSampleRate / 2);
+        return IsLogarithmic ? Math.Log10(1 + 20.48 * fraction) / Math.Log10(21.48) : fraction;
+    }
 
     private Point? _hoverPosition;
     private static readonly IPen GuidePen = new Pen(Brushes.Blue, 1);
@@ -46,7 +63,7 @@ public abstract class FrequencyChartControl : Control
 
     static FrequencyChartControl()
     {
-        AffectsRender<FrequencyChartControl>(HoverFrequencyProperty, SampleRateProperty);
+        AffectsRender<FrequencyChartControl>(HoverFrequencyProperty, SampleRateProperty, IsLogarithmicProperty);
     }
 
     protected override void OnPointerMoved(PointerEventArgs e)
@@ -80,7 +97,7 @@ public abstract class FrequencyChartControl : Control
     protected override void OnPropertyChanged(AvaloniaPropertyChangedEventArgs change)
     {
         base.OnPropertyChanged(change);
-        if (change.Property == BoundsProperty || change.Property == SampleRateProperty)
+        if (change.Property == BoundsProperty || change.Property == SampleRateProperty || change.Property == IsLogarithmicProperty)
             UpdateHoverFrequency();
     }
 

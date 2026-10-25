@@ -38,6 +38,9 @@ public partial class MainViewModel : ViewModelBase
     [ObservableProperty]
     private double? _hoverFrequency;
 
+    [ObservableProperty]
+    private bool _isLogarithmic;
+
     // MusicScope Format Matrix
     [ObservableProperty]
     private string _formatName = "FLAC";
@@ -180,6 +183,15 @@ public partial class MainViewModel : ViewModelBase
     private float[]? _spectrogramMin;
 
     [ObservableProperty]
+    private float[]? _spectrogramLogMax;
+
+    [ObservableProperty]
+    private float[]? _spectrogramLogAvg;
+
+    [ObservableProperty]
+    private float[]? _spectrogramLogMin;
+
+    [ObservableProperty]
     private int[]? _spectrogramRowCount;
 
     [ObservableProperty]
@@ -278,6 +290,9 @@ public partial class MainViewModel : ViewModelBase
         SpectrogramMax = null;
         SpectrogramAvg = null;
         SpectrogramMin = null;
+        SpectrogramLogMax = null;
+        SpectrogramLogAvg = null;
+        SpectrogramLogMin = null;
         SpectrogramRowCount = null;
         SModeHistogram = null;
         SModeMaxCount = 0;
@@ -414,6 +429,9 @@ public partial class MainViewModel : ViewModelBase
             SpectrogramMax = s.SpectrogramMax;
             SpectrogramAvg = s.SpectrogramAvg;
             SpectrogramMin = s.SpectrogramMin;
+            SpectrogramLogMax = s.SpectrogramLogMax;
+            SpectrogramLogAvg = s.SpectrogramLogAvg;
+            SpectrogramLogMin = s.SpectrogramLogMin;
             SpectrogramRowCount = s.SpectrogramRowCount;
         }
 
@@ -508,6 +526,9 @@ public partial class MainViewModel : ViewModelBase
             SpectrogramMax = r.SpectrogramMax;
             SpectrogramAvg = r.SpectrogramAvg;
             SpectrogramMin = r.SpectrogramMin;
+            SpectrogramLogMax = r.SpectrogramLogMax;
+            SpectrogramLogAvg = r.SpectrogramLogAvg;
+            SpectrogramLogMin = r.SpectrogramLogMin;
             SpectrogramRowCount = r.SpectrogramRowCount;
         }
         StereoDensityCloud = r.Stereo.DensityCloud;

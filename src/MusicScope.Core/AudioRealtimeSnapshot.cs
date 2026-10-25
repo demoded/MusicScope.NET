@@ -58,6 +58,9 @@ public record AudioRealtimeSnapshot
     public float[]? SpectrogramMax { get; init; }
     public float[]? SpectrogramAvg { get; init; }
     public float[]? SpectrogramMin { get; init; }
+    public float[]? SpectrogramLogMax { get; init; }
+    public float[]? SpectrogramLogAvg { get; init; }
+    public float[]? SpectrogramLogMin { get; init; }
     public int[]? SpectrogramRowCount { get; init; }
 
     // Goniometer vector points for phosphor scope

@@ -51,7 +51,26 @@ public sealed class AudioAnalysisEngine
     private readonly float[] _spectrogramMax = new float[SpectrogramRows * SpectrogramCols];
     private readonly float[] _spectrogramAvg = new float[SpectrogramRows * SpectrogramCols];
     private readonly float[] _spectrogramMin = new float[SpectrogramRows * SpectrogramCols];
+    private readonly float[] _spectrogramLogMax = new float[SpectrogramRows * SpectrogramCols];
+    private readonly float[] _spectrogramLogAvg = new float[SpectrogramRows * SpectrogramCols];
+    private readonly float[] _spectrogramLogMin = new float[SpectrogramRows * SpectrogramCols];
     private readonly int[] _spectrogramRowCount = new int[SpectrogramRows];
+
+    // Precomputed 1024-column to 4096-bin mapping for 8192-point FFT logarithmic spectrogram.
+    // Matches original XiVero WaterfallControl.java lines 270 & 338.
+    private static readonly int[] LogSpectrogramBinMap = InitializeLogSpectrogramBinMap();
+
+    private static int[] InitializeLogSpectrogramBinMap()
+    {
+        int[] map = new int[SpectrogramCols];
+        double streamDecoder = 1024.0 / Math.Log10(4096.0 * 0.005 + 1.0);
+        for (int n = 0; n < SpectrogramCols; n++)
+        {
+            int bin = (int)((Math.Pow(10.0, (double)n / streamDecoder) - 1.0) / 0.005);
+            map[n] = Math.Clamp(bin, 0, 4095);
+        }
+        return map;
+    }
 
     private long _totalFrames;
     private long _processedFrames;
@@ -88,7 +107,6 @@ public sealed class AudioAnalysisEngine
     /// </summary>
     public void ProcessAudioBlock(ReadOnlySpan<float> interleavedSamples)
     {
-        _logSpectrum.Process(interleavedSamples, _channelCount);
         _loudnessMeter.ProcessInterleaved(interleavedSamples);
         _truePeakMeter.ProcessInterleaved(interleavedSamples);
 
@@ -103,6 +121,7 @@ public sealed class AudioAnalysisEngine
         {
             int sampleIdx = i * _channelCount;
             float left = interleavedSamples[sampleIdx];
+            _logSpectrum.Process(interleavedSamples.Slice(sampleIdx, _channelCount), _channelCount);
             float right = _channelCount >= 2 ? interleavedSamples[sampleIdx + 1] : left;
 
             // SpectrumModule.java caps each 50 ms block to its first FFT-sized window.
@@ -230,6 +249,9 @@ public sealed class AudioAnalysisEngine
             SpectrogramMax = _spectrogramMax,
             SpectrogramAvg = _spectrogramAvg,
             SpectrogramMin = _spectrogramMin,
+            SpectrogramLogMax = _spectrogramLogMax,
+            SpectrogramLogAvg = _spectrogramLogAvg,
+            SpectrogramLogMin = _spectrogramLogMin,
             SpectrogramRowCount = _spectrogramRowCount,
             GoniometerPointsX = gonioX,
             GoniometerPointsY = gonioY
@@ -296,6 +318,26 @@ public sealed class AudioAnalysisEngine
             }
         }
 
+        for (int n = 0; n < SpectrogramCols; n++)
+        {
+            int logBin = LogSpectrogramBinMap[n];
+            double logMag = _logSpectrum.GetMagnitude(logBin);
+            float logLinMag = (float)logMag;
+            int idx = rowOffset + n;
+            if (isFirstInRow)
+            {
+                _spectrogramLogMax[idx] = logLinMag;
+                _spectrogramLogAvg[idx] = logLinMag;
+                _spectrogramLogMin[idx] = logLinMag;
+            }
+            else
+            {
+                if (logLinMag > _spectrogramLogMax[idx]) _spectrogramLogMax[idx] = logLinMag;
+                if (logLinMag < _spectrogramLogMin[idx]) _spectrogramLogMin[idx] = logLinMag;
+                _spectrogramLogAvg[idx] += logLinMag;
+            }
+        }
+
         _spectrumFftCount++;
     }
 
@@ -355,6 +397,9 @@ public sealed class AudioAnalysisEngine
             SpectrogramMax = (float[])_spectrogramMax.Clone(),
             SpectrogramAvg = (float[])_spectrogramAvg.Clone(),
             SpectrogramMin = (float[])_spectrogramMin.Clone(),
+            SpectrogramLogMax = (float[])_spectrogramLogMax.Clone(),
+            SpectrogramLogAvg = (float[])_spectrogramLogAvg.Clone(),
+            SpectrogramLogMin = (float[])_spectrogramLogMin.Clone(),
             SpectrogramRowCount = (int[])_spectrogramRowCount.Clone()
         };
     }
@@ -381,6 +426,9 @@ public sealed class AudioAnalysisEngine
         Array.Clear(_spectrogramMax, 0, _spectrogramMax.Length);
         Array.Clear(_spectrogramAvg, 0, _spectrogramAvg.Length);
         Array.Clear(_spectrogramMin, 0, _spectrogramMin.Length);
+        Array.Clear(_spectrogramLogMax, 0, _spectrogramLogMax.Length);
+        Array.Clear(_spectrogramLogAvg, 0, _spectrogramLogAvg.Length);
+        Array.Clear(_spectrogramLogMin, 0, _spectrogramLogMin.Length);
         Array.Clear(_spectrogramRowCount, 0, _spectrogramRowCount.Length);
         _processedFrames = 0;
         _spectrumFftCount = 0;
