@@ -250,4 +250,37 @@ public class DsdDecimationTests
             if (File.Exists(tempFile)) File.Delete(tempFile);
         }
     }
+
+    [Fact]
+    public void DsdGainFactor_MatchesScarletBookSpecification()
+    {
+        // Scarlet Book specifies +6 dB boost to align 0 dB SACD with 0 dBFS PCM.
+        // XiVero implements this as Math.Pow(10.0, 0.3) in rHAjVyBgPhqkQKsOvJMPMYn.java line 25.
+        // 20 * log10(10^0.3) = 20 * 0.3 = 6.0 dB exactly.
+        double expectedGain = Math.Pow(10.0, 0.3);
+        Assert.Equal(DsdDecimationFilter.DsdGainFactor, expectedGain, tolerance: 1e-12);
+
+        double dbBoost = 20.0 * Math.Log10(DsdDecimationFilter.DsdGainFactor);
+        Assert.Equal(6.0, dbBoost, tolerance: 1e-9);
+    }
+
+    [Fact]
+    public void DsdDecimator_AppliesScarletBookGainToDecimatedOutput()
+    {
+        var decimator = new DsdChannelDecimator(2822400, DsdBitOrder.LsbFirst);
+
+        // Constant +1.0 signal in 1-bit DSD (0xFF = all 1 bits)
+        byte[] input = new byte[1024];
+        Array.Fill(input, (byte)0xFF);
+
+        float[] output = new float[input.Length];
+        int samplesWritten = decimator.Process(input, output);
+
+        // Steady state output should be scaled by DsdGainFactor (~2.0037 rather than ~1.004)
+        for (int i = 250; i < samplesWritten; i++)
+        {
+            Assert.True(output[i] > 1.95f && output[i] < 2.05f,
+                $"Sample {i} was {output[i]}, expected ~2.0037 (scaled by DsdGainFactor).");
+        }
+    }
 }

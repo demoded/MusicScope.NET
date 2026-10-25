@@ -22,6 +22,14 @@ public enum DsdBitOrder
 /// </summary>
 public static class DsdDecimationFilter
 {
+    /// <summary>
+    /// Standard DSD Scarlet Book gain boost: 10^0.3 = +6.0206 dB (approx 1.9952623149688795).
+    /// Standard SACD/DSD 0 dB reference level is -6 dBFS relative to 1-bit full scale pulses (P_max = 0.5).
+    /// Original XiVero MusicScope (rHAjVyBgPhqkQKsOvJMPMYn.java line 25 & 195) scales all decoded DSD samples
+    /// by Math.Pow(10.0, 0.3) to normalize 0 dB SACD to 0 dBFS PCM.
+    /// </summary>
+    public const double DsdGainFactor = 1.9952623149688795; // Math.Pow(10.0, 0.3)
+
     // 9 FIR coefficient filter sets matching original XiVero FIRDecimationFilter.java
     public static readonly double[] Filter0 = [
         -3.968528904284404E-8, -1.2090352922627608E-7, -2.9511808728104506E-7, -6.203400931207982E-7, -1.1779177384429906E-6, -2.0718684061002688E-6,

@@ -147,14 +147,14 @@ public sealed class DsdChannelDecimator
                             if (++r3 > 200) r3 = 0;
                         }
                         if (outIdx < pcmOutput.Length)
-                            pcmOutput[outIdx++] = (float)s3;
+                            pcmOutput[outIdx++] = (float)(s3 * DsdDecimationFilter.DsdGainFactor);
                     }
                     if (++_stage3DecimCount == s3Decim) _stage3DecimCount = 0;
                 }
                 else
                 {
                     if (outIdx < pcmOutput.Length)
-                        pcmOutput[outIdx++] = (float)s2;
+                        pcmOutput[outIdx++] = (float)(s2 * DsdDecimationFilter.DsdGainFactor);
                 }
             }
             if (++_stage2DecimCount == s2Decim) _stage2DecimCount = 0;
