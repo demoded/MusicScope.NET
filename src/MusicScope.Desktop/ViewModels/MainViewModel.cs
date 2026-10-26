@@ -1,4 +1,5 @@
 using System;
+using System.Reflection;
 using System.IO;
 using System.Threading;
 using System.Threading.Tasks;
@@ -19,6 +20,9 @@ public partial class MainViewModel : ViewModelBase
     private readonly DawSocketServer _dawServer;
     private AudioAnalysisEngine? _liveEngine;
     private CancellationTokenSource? _analysisCts;
+
+    [ObservableProperty]
+    private string _appVersion = GetAppVersion();
 
     [ObservableProperty]
     private string _trackTitle = "No Audio Loaded";
@@ -550,5 +554,26 @@ public partial class MainViewModel : ViewModelBase
             });
         }
         catch { }
+    }
+
+    private static string GetAppVersion()
+    {
+        var assembly = typeof(MainViewModel).Assembly;
+        var infoVer = assembly.GetCustomAttribute<AssemblyInformationalVersionAttribute>()?.InformationalVersion;
+        if (!string.IsNullOrWhiteSpace(infoVer))
+        {
+            int plusIndex = infoVer.IndexOf('+');
+            string ver = plusIndex > 0 ? infoVer[..plusIndex] : infoVer;
+            if (!string.IsNullOrWhiteSpace(ver) && ver != "1.0.0")
+            {
+                return ver.StartsWith('v') ? ver : $"v{ver}";
+            }
+        }
+        var v = assembly.GetName().Version;
+        if (v != null && (v.Major > 1 || (v.Major == 1 && (v.Minor > 0 || v.Build > 0))))
+        {
+            return $"v{v.Major}.{v.Minor}.{v.Build}";
+        }
+        return "v1.3.0";
     }
 }

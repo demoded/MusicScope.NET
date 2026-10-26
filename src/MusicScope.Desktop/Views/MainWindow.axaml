@@ -24,9 +24,9 @@
         <Border Grid.Row="0" Background="#0A0D10" BorderBrush="#1C2127" BorderThickness="0,0,0,1" Padding="12,6">
             <Grid ColumnDefinitions="Auto,Auto,*,Auto,Auto">
                 <StackPanel Orientation="Horizontal" Spacing="8" VerticalAlignment="Center">
-                    <TextBlock Text="MusicScope" FontSize="16" FontWeight="Bold" Foreground="#00E5FF"/>
+                    <TextBlock Text="MusicScope.NET" FontSize="16" FontWeight="Bold" Foreground="#00E5FF"/>
                     <Border Background="#161B22" CornerRadius="4" Padding="5,1">
-                        <TextBlock Text=".NET 10" FontSize="10" Foreground="#8B949E" FontWeight="SemiBold"/>
+                        <TextBlock Text="{Binding AppVersion}" FontSize="10" Foreground="#8B949E" FontWeight="SemiBold"/>
                     </Border>
                 </StackPanel>
 
