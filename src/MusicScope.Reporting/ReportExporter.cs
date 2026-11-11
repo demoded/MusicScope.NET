@@ -16,6 +16,29 @@ public static class ReportExporter
     private static readonly JsonSerializerOptions JsonOptions = new() { WriteIndented = true };
 
     /// <summary>
+    /// Formats a <see cref="TimeSpan"/> duration for human-readable reports and UI displays.
+    /// If duration is 1 hour or more, hours are included (e.g., "1:15:04" or "1:15:04.50").
+    /// Otherwise, standard minute-second formatting is used (e.g., "15:04" or "15:04.50").
+    /// </summary>
+    public static string FormatDuration(TimeSpan duration, bool includeHundredths = false)
+    {
+        if (duration < TimeSpan.Zero)
+            duration = TimeSpan.Zero;
+
+        int totalHours = (int)duration.TotalHours;
+        if (includeHundredths)
+        {
+            return totalHours > 0
+                ? $"{totalHours}:{duration:mm\\:ss\\.ff}"
+                : $"{duration:mm\\:ss\\.ff}";
+        }
+
+        return totalHours > 0
+            ? $"{totalHours}:{duration:mm\\:ss}"
+            : $"{duration:mm\\:ss}";
+    }
+
+    /// <summary>
     /// Exports a report to JSON format.
     /// </summary>
     public static async Task ExportToJsonAsync(FullAnalysisReport report, string outputPath)
@@ -72,7 +95,7 @@ public static class ReportExporter
         sb.AppendLine($"File Location    : {r.FilePath}");
         sb.AppendLine($"Format / Codec   : {r.Format}");
         sb.AppendLine($"Audio Stream     : {r.SampleRate} Hz | {r.Channels} Channels | {r.BitDepth}-bit");
-        sb.AppendLine($"Duration         : {r.Duration:mm\\:ss\\.ff}");
+        sb.AppendLine($"Duration         : {FormatDuration(r.Duration, includeHundredths: true)}");
         sb.AppendLine($"Analyzed At      : {r.AnalyzedAt:yyyy-MM-dd HH:mm:ss} UTC");
         sb.AppendLine("--------------------------------------------------------------------------------");
         sb.AppendLine("LOUDNESS (ITU-R BS.1770-4 / EBU R128)");

@@ -309,7 +309,8 @@ public partial class MainViewModel : ViewModelBase
         {
             var info = await _decoder.ProbeAsync(path, ct);
             double displayRate = info.ContainerSampleRate > 0 ? info.ContainerSampleRate : info.SampleRate;
-            FormatDetails = $"{info.FormatName} | {displayRate:0} Hz | {info.ChannelCount} Channels | {info.BitDepth}-bit | {info.Duration:mm\\:ss}";
+            string durationStr = ReportExporter.FormatDuration(info.Duration);
+            FormatDetails = $"{info.FormatName} | {displayRate:0} Hz | {info.ChannelCount} Channels | {info.BitDepth}-bit | {durationStr}";
             SampleRate = info.SampleRate;
             ContainerSampleRate = displayRate;
             FormatName = info.FormatName;
