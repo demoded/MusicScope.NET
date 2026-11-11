@@ -22,6 +22,7 @@
     <ProjectReference Include="..\..\src\MusicScope.Core\MusicScope.Core.csproj" />
     <ProjectReference Include="..\..\src\MusicScope.Network\MusicScope.Network.csproj" />
     <ProjectReference Include="..\..\src\MusicScope.Audio\MusicScope.Audio.csproj" />
+    <ProjectReference Include="..\..\src\MusicScope.Reporting\MusicScope.Reporting.csproj" />
   </ItemGroup>
 
 </Project>

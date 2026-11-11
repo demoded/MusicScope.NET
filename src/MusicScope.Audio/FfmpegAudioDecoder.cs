@@ -78,7 +78,7 @@ public sealed class FfmpegAudioDecoder : IAudioDecoder
         string format = Path.GetExtension(filePath).TrimStart('.').ToUpperInvariant();
 
         // Parse Duration: 00:03:45.67
-        var durMatch = Regex.Match(output, @"Duration:\s*(\d+):(\d+):(\d+\.\d+)");
+        var durMatch = Regex.Match(output, @"Duration:\s*(\d+):(\d+):(\d+(?:\.\d+)?)");
         if (durMatch.Success)
         {
             int h = int.Parse(durMatch.Groups[1].Value);
