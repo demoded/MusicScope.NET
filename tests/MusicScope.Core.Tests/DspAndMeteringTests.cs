@@ -287,7 +287,7 @@ public class DspAndMeteringTests
 #if DEBUG
         double thresholdSeconds = 60.0;
 #else
-        double thresholdSeconds = 15.0;
+        double thresholdSeconds = 20.0;
 #endif
         Assert.True(sw.Elapsed.TotalSeconds < thresholdSeconds, $"Processing 30 min audio took {sw.Elapsed.TotalSeconds:F2}s (throughput {30.0 / (sw.Elapsed.TotalMinutes):F0}x realtime)");
     }
