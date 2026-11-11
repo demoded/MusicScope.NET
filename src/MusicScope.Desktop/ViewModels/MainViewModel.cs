@@ -575,6 +575,6 @@ public partial class MainViewModel : ViewModelBase
         {
             return $"v{v.Major}.{v.Minor}.{v.Build}";
         }
-        return "v1.3.0";
+        return "v1.4.0";
     }
 }

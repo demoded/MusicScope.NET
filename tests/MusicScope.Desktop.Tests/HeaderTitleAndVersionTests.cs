@@ -17,7 +17,7 @@ public class HeaderTitleAndVersionTests
         var vm = new MainViewModel();
         Assert.NotNull(vm.AppVersion);
         Assert.StartsWith("v1.", vm.AppVersion);
-        Assert.Equal("v1.3.0", vm.AppVersion);
+        Assert.Equal("v1.4.0", vm.AppVersion);
     }
 
     [AvaloniaFact]
@@ -48,7 +48,7 @@ public class HeaderTitleAndVersionTests
             // Verify version badge displays current version
             var versionTagBlock = textBlocks.FirstOrDefault(tb => tb.Text == vm.AppVersion);
             Assert.NotNull(versionTagBlock);
-            Assert.Equal("v1.3.0", versionTagBlock.Text);
+            Assert.Equal("v1.4.0", versionTagBlock.Text);
         }
         finally
         {
