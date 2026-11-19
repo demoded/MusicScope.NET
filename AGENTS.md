@@ -313,3 +313,38 @@ When modifying or expanding the codebase, always follow these core principles:
 * Preserve existing XML documentation comments and docstrings.
 * Keep DSP inner loops allocation-free and optimized with `Span<T>` and `ReadOnlySpan<T>`.
 * In Avalonia controls, always register dependency properties with `AffectsRender<TControl>(...)` to ensure smooth 60 FPS repaints.
+
+---
+
+## 6. Daily Community Thread Monitoring (Audio Science Review)
+
+AI agents and developers must check the Audio Science Review (ASR) community discussion thread daily for user feedback, macOS/Linux test results, bug reports, and feature requests.
+
+* **Thread URL**: [Audio Science Review - XiVero Audio Tools are free now](https://www.audiosciencereview.com/forum/index.php?threads/xivero-audio-tools-are-free-now-musicscope-audiorepair-xisrc-amtra-and-hpex.25076/page-2)
+
+### Monitoring Status
+
+| Metric | Status / Value |
+| --- | --- |
+| **Last Checked Date** | `2026-11-20` |
+| **Current Page** | `2` (page 3 does not exist yet; request redirects with HTTP 303 to page 2) |
+| **Last Known Message** | Post `#38` by `demoded` on `2026-09-25T23:41:56+0100` |
+| **New Messages Note** | No new messages since post `#38` (announcing the .NET 10 / AvaloniaUI rewrite and asking for Mac testing). |
+
+### Daily Check Procedure
+
+1. **Check for New Pages**:
+   - Probe for a subsequent page (e.g., `page-3`) using `curl.exe`:
+     ```pwsh
+     curl.exe -s -i -A "Mozilla/5.0" "https://www.audiosciencereview.com/forum/index.php?threads/xivero-audio-tools-are-free-now-musicscope-audiorepair-xisrc-amtra-and-hpex.25076/page-3" | Select-Object -First 10
+     ```
+   - If XenForo returns `HTTP/1.1 303 See Other` redirecting to `page-2`, the thread has not expanded beyond page 2. If `HTTP/1.1 200 OK` is returned, a new page exists.
+2. **Check for New Messages**:
+   - Inspect the latest page for any posts newer than the recorded **Last Known Message**.
+3. **Update Status in AGENTS.md**:
+   - Update `Last Checked Date` to the current check date.
+   - Update `Current Page` if thread pagination expanded.
+   - Update `Last Known Message` and `New Messages Note` with the latest post metadata and discussion summaries.
+4. **Report to User**:
+   - When new messages or community questions are found, present a concise note summarizing user feedback, issues reported, or questions to address.
+
