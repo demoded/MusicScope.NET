@@ -66,21 +66,21 @@ public sealed class GoniometerControl : Control
     private static readonly IPen AxisPen = new Pen(new SolidColorBrush(Color.FromRgb(45, 50, 55)), 1);
 
     // Phosphor decay palette (16 brightness shades from dark phosphor decay to neon core)
-    private static readonly IBrush[] PhosphorPalette = InitializePhosphorPalette();
+    private static readonly uint[] PhosphorColors = InitializePhosphorColors();
     private static readonly IPen[] PhosphorPens = InitializePhosphorPens();
 
-    private static IBrush[] InitializePhosphorPalette()
+    private static uint[] InitializePhosphorColors()
     {
-        var palette = new IBrush[16];
+        var colors = new uint[16];
         for (int i = 0; i < 16; i++)
         {
             double t = (i + 1) / 16.0;
             byte r = (byte)(15 * t);
             byte g = (byte)(40 + 215 * t);
             byte b = (byte)(35 * t);
-            palette[i] = new SolidColorBrush(Color.FromRgb(r, g, b));
+            colors[i] = 0xFF000000u | ((uint)r << 16) | ((uint)g << 8) | b;
         }
-        return palette;
+        return colors;
     }
 
     private static IPen[] InitializePhosphorPens()
@@ -103,7 +103,21 @@ public sealed class GoniometerControl : Control
     private static readonly IBrush CorrGreenBrush = new SolidColorBrush(Color.FromRgb(0, 153, 0));
     private static readonly IPen CursorPen = new Pen(new SolidColorBrush(Color.FromRgb(255, 255, 255)), 2);
 
+    private static readonly FormattedText HeaderText = CreateText("Stereo", 11, HeaderBrush);
+    private static readonly FormattedText PlusLText = CreateText("+L", 10, CornerLabelBrush);
+    private static readonly FormattedText PlusRText = CreateText("+R", 10, CornerLabelBrush);
+    private static readonly FormattedText MinusRText = CreateText("-R", 10, CornerLabelBrush);
+    private static readonly FormattedText MinusLText = CreateText("-L", 10, CornerLabelBrush);
+    private static readonly FormattedText OutOfPhaseText = CreateText("out of\nphase", 9, OutOfPhaseBrush);
+    private static readonly FormattedText CorrNegOneText = CreateText("-1", 9, CorrRedBrush);
+    private static readonly FormattedText CorrZeroText = CreateText("0", 9, CorrYellowBrush);
+    private static readonly FormattedText CorrPosOneText = CreateText("+1", 9, CorrGreenBrush);
+
+    private static FormattedText CreateText(string text, double size, IBrush brush) =>
+        new(text, CultureInfo.InvariantCulture, FlowDirection.LeftToRight, Typeface.Default, size, brush);
+
     private WriteableBitmap? _cloudBitmap;
+    private WriteableBitmap? _liveBitmap;
     private byte[]? _cachedDensityCloud;
     private readonly double[] _corrHistory = new double[100];
     private int _corrHistoryCount = 0;
@@ -142,7 +156,7 @@ public sealed class GoniometerControl : Control
         var tf = Typeface.Default;
 
         // Header: Stereo
-        DrawText(context, "Stereo", tf, 11, HeaderBrush, 8, 8);
+        context.DrawText(HeaderText, new Point(8, 8));
 
         // Scope Area
         double barAreaHeight = 32;
@@ -156,14 +170,14 @@ public sealed class GoniometerControl : Control
         if (radius > 15)
         {
             // Corner Labels: +L (top-left), +R (top-right), -R (bottom-left), -L (bottom-right)
-            DrawText(context, "+L", tf, 10, CornerLabelBrush, 8, scopeTop + 4);
-            DrawTextRight(context, "+R", tf, 10, CornerLabelBrush, width - 8, scopeTop + 4);
-            DrawText(context, "-R", tf, 10, CornerLabelBrush, 8, scopeBottom - 14);
-            DrawTextRight(context, "-L", tf, 10, CornerLabelBrush, width - 8, scopeBottom - 14);
+            context.DrawText(PlusLText, new Point(8, scopeTop + 4));
+            context.DrawText(PlusRText, new Point(width - 8 - PlusRText.Width, scopeTop + 4));
+            context.DrawText(MinusRText, new Point(8, scopeBottom - 14));
+            context.DrawText(MinusLText, new Point(width - 8 - MinusLText.Width, scopeBottom - 14));
 
             // "out of phase" dim labels
-            DrawText(context, "out of\nphase", tf, 9, OutOfPhaseBrush, 8, centerY - 10);
-            DrawTextRight(context, "out of\nphase", tf, 9, OutOfPhaseBrush, width - 8, centerY - 10);
+            context.DrawText(OutOfPhaseText, new Point(8, centerY - 10));
+            context.DrawText(OutOfPhaseText, new Point(width - 8 - OutOfPhaseText.Width, centerY - 10));
 
             // Diagonal crosshair axes
             double d = radius * 0.95;
@@ -212,19 +226,38 @@ public sealed class GoniometerControl : Control
             }
             else if (px != null && py != null && px.Length > 0 && py.Length > 0)
             {
-                // High-resolution live oscilloscope trace (5000 points with phosphor decay)
+                // High-resolution live oscilloscope trace (5000 points with phosphor decay) rendered into reusable 256x256 bitmap
+                _liveBitmap ??= new WriteableBitmap(
+                    new PixelSize(256, 256),
+                    new Vector(96, 96),
+                    PixelFormat.Bgra8888,
+                    AlphaFormat.Premul);
+
                 int count = Math.Min(px.Length, py.Length);
-                double scale = radius / 0.77815;
+                const float bmpHalf = 128f;
+                float bmpScale = bmpHalf / 0.77815f;
 
-                for (int i = 0; i < count; i++)
+                using (var buf = _liveBitmap.Lock())
                 {
-                    double x = centerX + px[i] * scale;
-                    double y = centerY + py[i] * scale;
-
-                    int paletteIdx = (i * 16) / count;
-                    var brush = PhosphorPalette[paletteIdx];
-                    context.DrawRectangle(brush, null, new Rect(x - 0.75, y - 0.75, 1.5, 1.5));
+                    unsafe
+                    {
+                        uint* ptr = (uint*)buf.Address;
+                        new Span<uint>(ptr, 256 * 256).Clear();
+                        for (int i = 0; i < count; i++)
+                        {
+                            int bx = (int)(bmpHalf + px[i] * bmpScale);
+                            int by = (int)(bmpHalf + py[i] * bmpScale);
+                            if ((uint)bx < 256 && (uint)by < 256)
+                            {
+                                int paletteIdx = (i * 16) / count;
+                                ptr[by * 256 + bx] = PhosphorColors[paletteIdx];
+                            }
+                        }
+                    }
                 }
+
+                Rect destRect = new Rect(centerX - radius, centerY - radius, radius * 2, radius * 2);
+                context.DrawImage(_liveBitmap, destRect);
             }
         }
 
@@ -270,9 +303,9 @@ public sealed class GoniometerControl : Control
         }
 
         // Labels: -1 (Red), 0 (Yellow), +1 (Green)
-        DrawText(context, "-1", tf, 9, CorrRedBrush, barLeft, barY + barH + 2);
-        DrawCenteredText(context, "0", tf, 9, CorrYellowBrush, barLeft + redW + yellowW * 0.5, barY + barH + 2);
-        DrawTextRight(context, "+1", tf, 9, CorrGreenBrush, barRight, barY + barH + 2);
+        context.DrawText(CorrNegOneText, new Point(barLeft, barY + barH + 2));
+        context.DrawText(CorrZeroText, new Point(barLeft + redW + yellowW * 0.5 - CorrZeroText.Width * 0.5, barY + barH + 2));
+        context.DrawText(CorrPosOneText, new Point(barRight - CorrPosOneText.Width, barY + barH + 2));
     }
 
     private static void DrawText(DrawingContext ctx, string text, Typeface tf, double size, IBrush brush, double x, double y)

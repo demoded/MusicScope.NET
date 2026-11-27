@@ -58,7 +58,13 @@ public static class DffReader
         AudioChunkDecodedHandler onChunkDecoded,
         CancellationToken ct = default)
     {
-        await using var fs = new FileStream(filePath, FileMode.Open, FileAccess.Read, FileShare.Read, 65536, useAsync: true);
+        await using var fs = new FileStream(
+            filePath,
+            FileMode.Open,
+            FileAccess.Read,
+            FileShare.Read,
+            bufferSize: 262144,
+            FileOptions.Asynchronous | FileOptions.SequentialScan);
         ParseHeader(fs, out int channelCount, out int dsdSampleRate, out long dataOffset, out long audioDataBytes);
 
         if (channelCount <= 0 || dsdSampleRate <= 0 || audioDataBytes <= 0)
@@ -74,10 +80,10 @@ public static class DffReader
             decimators[ch] = new DsdChannelDecimator(dsdSampleRate, DsdBitOrder.MsbFirst);
         }
 
-        // Read in chunks of 4096 frames (4096 bytes per channel = 4096 * channelCount bytes)
-        const int framesPerChunk = 4096;
+        // Read in chunks of 65536 frames (matching ~65536 PCM float chunks for stereo DSD64)
+        const int framesPerChunk = 65536;
         int rawChunkBytes = framesPerChunk * channelCount;
-        byte[] rawBuffer = new byte[rawChunkBytes];
+        byte[] rawBuffer = System.Buffers.ArrayPool<byte>.Shared.Rent(rawChunkBytes);
 
         byte[][] channelBytes = new byte[channelCount][];
         float[][] channelOutputs = new float[channelCount][];
@@ -87,63 +93,151 @@ public static class DffReader
             channelOutputs[ch] = new float[framesPerChunk + 64];
         }
 
-        float[] interleavedOutput = new float[(framesPerChunk + 64) * channelCount];
+        int interleavedCap = (framesPerChunk + 64) * channelCount;
+        float[] interleavedA = new float[interleavedCap];
+        float[] interleavedB = new float[interleavedCap];
+        bool useBufferA = true;
+        Task pendingCallback = Task.CompletedTask;
 
         long totalBytesRead = 0;
 
-        while (totalBytesRead < audioDataBytes)
+        try
         {
-            ct.ThrowIfCancellationRequested();
-
-            int toRead = (int)Math.Min((long)rawChunkBytes, audioDataBytes - totalBytesRead);
-            int bytesRead = await fs.ReadAsync(rawBuffer.AsMemory(0, toRead), ct);
-            if (bytesRead <= 0)
-                break;
-
-            totalBytesRead += bytesRead;
-
-            int framesInChunk = bytesRead / channelCount;
-            if (framesInChunk <= 0)
-                continue;
-
-            // In DFF: samples are interleaved byte-by-byte (ch0, ch1, ch0, ch1...)
-            for (int f = 0; f < framesInChunk; f++)
+            while (totalBytesRead < audioDataBytes)
             {
-                int baseIdx = f * channelCount;
-                for (int ch = 0; ch < channelCount; ch++)
+                ct.ThrowIfCancellationRequested();
+
+                int toRead = (int)Math.Min((long)rawChunkBytes, audioDataBytes - totalBytesRead);
+                int bytesRead = await fs.ReadAtLeastAsync(rawBuffer.AsMemory(0, toRead), toRead, throwOnEndOfStream: false, ct);
+                if (bytesRead <= 0)
+                    break;
+
+                totalBytesRead += bytesRead;
+
+                int framesInChunk = bytesRead / channelCount;
+                if (framesInChunk <= 0)
+                    continue;
+
+                if (channelCount == 2)
                 {
-                    channelBytes[ch][f] = rawBuffer[baseIdx + ch];
+                    DeinterleaveStereoBytes(rawBuffer.AsSpan(0, framesInChunk * 2), channelBytes[0], channelBytes[1], framesInChunk);
                 }
-            }
-
-            int samplesWritten = 0;
-            for (int ch = 0; ch < channelCount; ch++)
-            {
-                ReadOnlySpan<byte> chSpan = channelBytes[ch].AsSpan(0, framesInChunk);
-                samplesWritten = decimators[ch].Process(chSpan, channelOutputs[ch].AsSpan());
-            }
-
-            if (samplesWritten > 0)
-            {
-                for (int s = 0; s < samplesWritten; s++)
+                else
                 {
-                    int baseIdx = s * channelCount;
-                    for (int ch = 0; ch < channelCount; ch++)
+                    for (int f = 0; f < framesInChunk; f++)
                     {
-                        interleavedOutput[baseIdx + ch] = channelOutputs[ch][s];
+                        int baseIdx = f * channelCount;
+                        for (int ch = 0; ch < channelCount; ch++)
+                        {
+                            channelBytes[ch][f] = rawBuffer[baseIdx + ch];
+                        }
                     }
                 }
 
-                double progress = audioDataBytes > 0
-                    ? Math.Min(1.0, (double)totalBytesRead / audioDataBytes)
-                    : 0.0;
+                int samplesWritten = 0;
+                if (channelCount == 2)
+                {
+                    int frames = framesInChunk;
+                    Task<int> ch1Task = Task.Run(() => decimators[1].Process(channelBytes[1].AsSpan(0, frames), channelOutputs[1].AsSpan()));
+                    samplesWritten = decimators[0].Process(channelBytes[0].AsSpan(0, frames), channelOutputs[0].AsSpan());
+                    await ch1Task;
+                }
+                else
+                {
+                    for (int ch = 0; ch < channelCount; ch++)
+                    {
+                        ReadOnlySpan<byte> chSpan = channelBytes[ch].AsSpan(0, framesInChunk);
+                        samplesWritten = decimators[ch].Process(chSpan, channelOutputs[ch].AsSpan());
+                    }
+                }
 
-                await onChunkDecoded(
-                    interleavedOutput.AsMemory(0, samplesWritten * channelCount),
-                    channelCount,
-                    pcmSampleRate,
-                    progress);
+                if (samplesWritten > 0)
+                {
+                    float[] currentOut = useBufferA ? interleavedA : interleavedB;
+                    useBufferA = !useBufferA;
+
+                    if (channelCount == 2)
+                    {
+                        InterleaveStereoFloats(channelOutputs[0], channelOutputs[1], currentOut, samplesWritten);
+                    }
+                    else
+                    {
+                        for (int s = 0; s < samplesWritten; s++)
+                        {
+                            int baseIdx = s * channelCount;
+                            for (int ch = 0; ch < channelCount; ch++)
+                            {
+                                currentOut[baseIdx + ch] = channelOutputs[ch][s];
+                            }
+                        }
+                    }
+
+                    double progress = audioDataBytes > 0
+                        ? Math.Min(1.0, (double)totalBytesRead / audioDataBytes)
+                        : 0.0;
+
+                    await pendingCallback;
+                    int sampleCount = samplesWritten * channelCount;
+                    pendingCallback = Task.Run(
+                        () => onChunkDecoded(currentOut.AsMemory(0, sampleCount), channelCount, pcmSampleRate, progress),
+                        ct);
+                }
             }
+
+            await pendingCallback;
+        }
+        finally
+        {
+            try { await pendingCallback; } catch { }
+            System.Buffers.ArrayPool<byte>.Shared.Return(rawBuffer);
+        }
+    }
+
+    private static void DeinterleaveStereoBytes(ReadOnlySpan<byte> interleaved, Span<byte> left, Span<byte> right, int frames)
+    {
+        int f = 0;
+        int unrolledEnd = frames - (frames & 3);
+        for (; f < unrolledEnd; f += 4)
+        {
+            int idx = f << 1;
+            left[f] = interleaved[idx];
+            right[f] = interleaved[idx + 1];
+            left[f + 1] = interleaved[idx + 2];
+            right[f + 1] = interleaved[idx + 3];
+            left[f + 2] = interleaved[idx + 4];
+            right[f + 2] = interleaved[idx + 5];
+            left[f + 3] = interleaved[idx + 6];
+            right[f + 3] = interleaved[idx + 7];
+        }
+        for (; f < frames; f++)
+        {
+            int idx = f << 1;
+            left[f] = interleaved[idx];
+            right[f] = interleaved[idx + 1];
+        }
+    }
+
+    private static void InterleaveStereoFloats(ReadOnlySpan<float> left, ReadOnlySpan<float> right, Span<float> interleaved, int samples)
+    {
+        int s = 0;
+        int unrolledEnd = samples - (samples & 3);
+        for (; s < unrolledEnd; s += 4)
+        {
+            int idx = s << 1;
+            interleaved[idx] = left[s];
+            interleaved[idx + 1] = right[s];
+            interleaved[idx + 2] = left[s + 1];
+            interleaved[idx + 3] = right[s + 1];
+            interleaved[idx + 4] = left[s + 2];
+            interleaved[idx + 5] = right[s + 2];
+            interleaved[idx + 6] = left[s + 3];
+            interleaved[idx + 7] = right[s + 3];
+        }
+        for (; s < samples; s++)
+        {
+            int idx = s << 1;
+            interleaved[idx] = left[s];
+            interleaved[idx + 1] = right[s];
         }
     }
 

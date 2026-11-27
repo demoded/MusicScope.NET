@@ -216,6 +216,29 @@ public static class DsdDecimationFilter
     // Filter 7 (DSD512): 21 blocks
     internal static readonly double[][,][] Stage1Tables = InitializeStage1Tables();
 
+    // Flat Stage 1 lookup tables: [filterId * 2 + bitOrder][blockIdx * 256 + byteValue]
+    internal static readonly double[][] Stage1FlatTables = InitializeFlatTables(Stage1Tables);
+
+    private static double[][] InitializeFlatTables(double[][,][] tables)
+    {
+        var flat = new double[tables.Length * 2][];
+        for (int f = 0; f < tables.Length; f++)
+        {
+            var t = tables[f];
+            int numBlocks = t.GetLength(1);
+            for (int bo = 0; bo < 2; bo++)
+            {
+                var arr = new double[numBlocks * 256];
+                for (int blk = 0; blk < numBlocks; blk++)
+                {
+                    Array.Copy(t[bo, blk], 0, arr, blk * 256, 256);
+                }
+                flat[f * 2 + bo] = arr;
+            }
+        }
+        return flat;
+    }
+
     private static double[][,][] InitializeStage1Tables()
     {
         // 4 Stage 1 filters: indices 0 (F0), 1 (F1), 2 (F2), 3 (F7)

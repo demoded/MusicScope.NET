@@ -252,6 +252,24 @@ public sealed class WaterfallControl : FrequencyChartControl
     private static readonly IPen RedCutoffPen = new Pen(new SolidColorBrush(Color.FromRgb(255, 0, 0)), 2.0);
     private static readonly IPen GridPen = new Pen(new SolidColorBrush(Color.FromRgb(50, 50, 50)), 1.0);
 
+    private static readonly FormattedText PercentText = CreateText("%", AxisTextBrush);
+    private static readonly FormattedText ZeroText = CreateText("0", AxisTextBrush);
+    private static readonly FormattedText TwentyFiveText = CreateText("25", AxisTextBrush);
+    private static readonly FormattedText FiftyText = CreateText("50", AxisTextBrush);
+    private static readonly FormattedText SeventyFiveText = CreateText("75", AxisTextBrush);
+    private static readonly FormattedText HundredText = CreateText("100", AxisTextBrush);
+    private static readonly FormattedText MaxText = CreateText("MAX", GreenAnnotationBrush);
+    private static readonly FormattedText AvgText = CreateText("AVG", GreenAnnotationBrush);
+    private static readonly FormattedText MinText = CreateText("MIN", GreenAnnotationBrush);
+    private static readonly FormattedText BryText = CreateText("BRY", GreenAnnotationBrush);
+    private static readonly FormattedText MonText = CreateText("MON", GreenAnnotationBrush);
+    private static readonly FormattedText ColText = CreateText("COL", GreenAnnotationBrush);
+    private static readonly FormattedText CofActiveText = CreateText("COF", GreenAnnotationBrush);
+    private static readonly FormattedText CofDimText = CreateText("COF", DimAnnotationBrush);
+
+    private static FormattedText CreateText(string text, IBrush brush) =>
+        new(text, CultureInfo.InvariantCulture, FlowDirection.LeftToRight, Typeface.Default, 9, brush);
+
     // Hit-testing cached metrics
     private double _leftMargin = 38.0;
     private double _yMax = 0.0;
@@ -510,7 +528,7 @@ public sealed class WaterfallControl : FrequencyChartControl
         }
 
         // Left Y-Axis labels: %, 0, MAX/AVG/MIN, 25, BRY/MON/COL, 50, COF, 75, 100
-        DrawText(context, "%", tf, 9, AxisTextBrush, 8, 4);
+        context.DrawText(PercentText, new Point(8, 4));
 
         double y0 = 12;
         double yMax = y0 + plotHeight * 0.12;
@@ -525,18 +543,18 @@ public sealed class WaterfallControl : FrequencyChartControl
         _yBry = yBry;
         _yCof = yCof;
 
-        string maxText = AggregationMode switch { 1 => "AVG", 2 => "MIN", _ => "MAX" };
-        string colText = ColormapMode switch { 0 => "MON", 1 => "COL", _ => "BRY" };
-        IBrush cofBrush = ShowCutOffFrequency ? GreenAnnotationBrush : DimAnnotationBrush;
+        FormattedText maxFt = AggregationMode switch { 1 => AvgText, 2 => MinText, _ => MaxText };
+        FormattedText colFt = ColormapMode switch { 0 => MonText, 1 => ColText, _ => BryText };
+        FormattedText cofFt = ShowCutOffFrequency ? CofActiveText : CofDimText;
 
-        DrawTextRight(context, "0", tf, 9, AxisTextBrush, leftMargin - 4, y0);
-        DrawTextRight(context, maxText, tf, 9, GreenAnnotationBrush, leftMargin - 4, yMax);
-        DrawTextRight(context, "25", tf, 9, AxisTextBrush, leftMargin - 4, y25);
-        DrawTextRight(context, colText, tf, 9, GreenAnnotationBrush, leftMargin - 4, yBry);
-        DrawTextRight(context, "50", tf, 9, AxisTextBrush, leftMargin - 4, y50);
-        DrawTextRight(context, "COF", tf, 9, cofBrush, leftMargin - 4, yCof);
-        DrawTextRight(context, "75", tf, 9, AxisTextBrush, leftMargin - 4, y75);
-        DrawTextRight(context, "100", tf, 9, AxisTextBrush, leftMargin - 4, y100);
+        context.DrawText(ZeroText, new Point(leftMargin - 4 - ZeroText.Width, y0));
+        context.DrawText(maxFt, new Point(leftMargin - 4 - maxFt.Width, yMax));
+        context.DrawText(TwentyFiveText, new Point(leftMargin - 4 - TwentyFiveText.Width, y25));
+        context.DrawText(colFt, new Point(leftMargin - 4 - colFt.Width, yBry));
+        context.DrawText(FiftyText, new Point(leftMargin - 4 - FiftyText.Width, y50));
+        context.DrawText(cofFt, new Point(leftMargin - 4 - cofFt.Width, yCof));
+        context.DrawText(SeventyFiveText, new Point(leftMargin - 4 - SeventyFiveText.Width, y75));
+        context.DrawText(HundredText, new Point(leftMargin - 4 - HundredText.Width, y100));
 
         // Draw Waterfall Bitmap
         context.DrawImage(_bitmap, plot);

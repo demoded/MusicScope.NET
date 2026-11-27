@@ -1,4 +1,7 @@
 using System;
+using System.Runtime.CompilerServices;
+using System.Runtime.InteropServices;
+using System.Runtime.Intrinsics;
 
 namespace MusicScope.Core.Stereo;
 
@@ -19,9 +22,9 @@ public sealed class StereoAnalyzer
     private double _smoothedCorrelation = 1.0;
     private const double SmoothingFactor = 0.05;
 
-    // 2D Density Histogram Grid (256x256) for Cumulative Stereo Phosphor Cloud
+    // 2D Density Histogram Grid (256x256 flattened row-major [x * 256 + y] for cache-friendly updates)
     public const int DensityGridSize = 256;
-    private readonly int[,] _densityGrid = new int[DensityGridSize, DensityGridSize];
+    private readonly int[] _densityGrid = new int[DensityGridSize * DensityGridSize];
 
     // Live Phosphor Points Ring Buffer (5000 points, matching MusicScope's high-resolution trace)
     public const int LivePointCount = 5000;
@@ -102,7 +105,7 @@ public sealed class StereoAnalyzer
 
             if ((uint)gx < DensityGridSize && (uint)gy < DensityGridSize)
             {
-                _densityGrid[gx, gy]++;
+                _densityGrid[gx * DensityGridSize + gy]++;
             }
         }
 
@@ -129,6 +132,7 @@ public sealed class StereoAnalyzer
     /// <summary>
     /// Processes interleaved float stereo samples.
     /// </summary>
+    [MethodImpl(MethodImplOptions.AggressiveOptimization)]
     public void ProcessInterleaved(ReadOnlySpan<float> stereoSamples)
     {
         int frameCount = stereoSamples.Length / 2;
@@ -139,22 +143,30 @@ public sealed class StereoAnalyzer
         double frameSumLR = 0.0;
 
         int i = 0;
-        int unrolledEnd = frameCount - (frameCount & 3);
-        for (; i < unrolledEnd; i += 4)
+        if (Vector256.IsHardwareAccelerated && frameCount >= 4)
         {
-            int idx = i << 1;
-            double l0 = stereoSamples[idx];
-            double r0 = stereoSamples[idx + 1];
-            double l1 = stereoSamples[idx + 2];
-            double r1 = stereoSamples[idx + 3];
-            double l2 = stereoSamples[idx + 4];
-            double r2 = stereoSamples[idx + 5];
-            double l3 = stereoSamples[idx + 6];
-            double r3 = stereoSamples[idx + 7];
+            ref float pSamples = ref MemoryMarshal.GetReference(stereoSamples);
+            var vSumL2 = Vector256<double>.Zero;
+            var vSumR2 = Vector256<double>.Zero;
+            var vSumLR = Vector256<double>.Zero;
+            var deinterleaveIdx = Vector256.Create(0, 2, 4, 6, 1, 3, 5, 7);
 
-            frameSumL2 += l0 * l0 + l1 * l1 + l2 * l2 + l3 * l3;
-            frameSumR2 += r0 * r0 + r1 * r1 + r2 * r2 + r3 * r3;
-            frameSumLR += l0 * r0 + l1 * r1 + l2 * r2 + l3 * r3;
+            int vecEnd = frameCount - (frameCount & 3);
+            for (; i < vecEnd; i += 4)
+            {
+                var v = Vector256.LoadUnsafe(ref pSamples, (nuint)(i << 1));
+                var deint = Vector256.Shuffle(v, deinterleaveIdx);
+                var vl = Vector256.WidenLower(deint);
+                var vr = Vector256.WidenUpper(deint);
+
+                vSumL2 = Vector256.FusedMultiplyAdd(vl, vl, vSumL2);
+                vSumR2 = Vector256.FusedMultiplyAdd(vr, vr, vSumR2);
+                vSumLR = Vector256.FusedMultiplyAdd(vl, vr, vSumLR);
+            }
+
+            frameSumL2 = Vector256.Sum(vSumL2);
+            frameSumR2 = Vector256.Sum(vSumR2);
+            frameSumLR = Vector256.Sum(vSumLR);
         }
 
         for (; i < frameCount; i++)
@@ -185,10 +197,80 @@ public sealed class StereoAnalyzer
         }
 
         // Accumulate 2D density cloud (sampling every 2nd frame)
-        for (int k = 0; k < frameCount; k += 2)
+        int[] grid = _densityGrid;
+        int dIdx = 0;
+        if (Vector256.IsHardwareAccelerated && frameCount >= 8)
         {
-            float l = stereoSamples[k * 2];
-            float r = stereoSamples[k * 2 + 1];
+            ref float pSamples = ref MemoryMarshal.GetReference(stereoSamples);
+            var pickEvenFrames = Vector256.Create(0, 4, 1, 5, 0, 4, 1, 5);
+            var groupChannels = Vector256.Create(0, 1, 4, 5, 2, 3, 6, 7);
+            var vInvSqrt2 = Vector128.Create(0.70710678f);
+            var vNegInvSqrt2 = Vector128.Create(-0.70710678f);
+            var vFive = Vector256.Create(5f);
+            var vOne = Vector256.Create(1f);
+            var vScale = Vector256.Create(140f);
+            var vCenter = Vector256.Create(128f);
+            var vSignMask = Vector256.Create(0x80000000u);
+            var vAbsMask = Vector256.Create(0x7FFFFFFFu);
+            var vMantMask = Vector256.Create(0x007FFFFF);
+            var vExpOne = Vector256.Create(0x3F800000);
+            var vExpBias = Vector256.Create(127);
+            var vLog10_2 = Vector256.Create(0.3010299956639812f);
+            var vTwoLog10_E = Vector256.Create(0.8685889638065037f); // 2 / ln(10)
+            var vC3 = Vector256.Create(1f / 3f);
+            var vC5 = Vector256.Create(1f / 5f);
+            var vC7 = Vector256.Create(1f / 7f);
+            var vC9 = Vector256.Create(1f / 9f);
+
+            int vecEndK = frameCount - (frameCount & 7);
+            for (; dIdx < vecEndK; dIdx += 8)
+            {
+                var v0 = Vector256.LoadUnsafe(ref pSamples, (nuint)(dIdx << 1));
+                var v1 = Vector256.LoadUnsafe(ref pSamples, (nuint)((dIdx + 4) << 1));
+                var s0 = Vector256.Shuffle(v0, pickEvenFrames).GetLower();
+                var s1 = Vector256.Shuffle(v1, pickEvenFrames).GetLower();
+                var grouped = Vector256.Shuffle(Vector256.Create(s0, s1), groupChannels);
+                var vL = grouped.GetLower();
+                var vR = grouped.GetUpper();
+
+                var rotX128 = (vR - vL) * vInvSqrt2;
+                var rotY128 = (vL + vR) * vNegInvSqrt2;
+                var rot = Vector256.Create(rotX128, rotY128);
+
+                var signBits = rot.AsUInt32() & vSignMask;
+                var absRot = (rot.AsUInt32() & vAbsMask).AsSingle();
+                var x = Vector256.FusedMultiplyAdd(vFive, absRot, vOne);
+
+                var xBits = x.AsInt32();
+                var exp = Vector256.ConvertToSingle((xBits >>> 23) - vExpBias);
+                var m = ((xBits & vMantMask) | vExpOne).AsSingle();
+                var u = (m - vOne) / (m + vOne);
+                var u2 = u * u;
+                var poly = Vector256.FusedMultiplyAdd(u2, vC9, vC7);
+                poly = Vector256.FusedMultiplyAdd(u2, poly, vC5);
+                poly = Vector256.FusedMultiplyAdd(u2, poly, vC3);
+                poly = Vector256.FusedMultiplyAdd(u2, poly, vOne);
+                var log10 = Vector256.FusedMultiplyAdd(exp, vLog10_2, u * vTwoLog10_E * poly);
+
+                var comp = (log10.AsUInt32() | signBits).AsSingle();
+                var coords = Vector256.ConvertToInt32(Vector256.FusedMultiplyAdd(comp, vScale, vCenter));
+
+                for (int lane = 0; lane < 4; lane++)
+                {
+                    int gx = coords.GetElement(lane);
+                    int gy = coords.GetElement(lane + 4);
+                    if ((uint)gx < DensityGridSize && (uint)gy < DensityGridSize)
+                    {
+                        grid[gx * DensityGridSize + gy]++;
+                    }
+                }
+            }
+        }
+
+        for (; dIdx < frameCount; dIdx += 2)
+        {
+            float l = stereoSamples[dIdx * 2];
+            float r = stereoSamples[dIdx * 2 + 1];
 
             float rotX = (r - l) * 0.70710678f;
             float rotY = -(l + r) * 0.70710678f;
@@ -201,7 +283,7 @@ public sealed class StereoAnalyzer
 
             if ((uint)gx < DensityGridSize && (uint)gy < DensityGridSize)
             {
-                _densityGrid[gx, gy]++;
+                grid[gx * DensityGridSize + gy]++;
             }
         }
 
@@ -291,14 +373,17 @@ public sealed class StereoAnalyzer
     public byte[] GenerateDensityCloud()
     {
         int maxCount = 1;
-        for (int y = 0; y < DensityGridSize; y++)
+        int[] grid = _densityGrid;
+        for (int x = 0; x < DensityGridSize; x++)
         {
-            for (int x = 0; x < DensityGridSize; x++)
+            int colBase = x * DensityGridSize;
+            for (int y = 0; y < DensityGridSize; y++)
             {
                 // Ignore exact center crosshair where digital silence or DC accumulates (matching StereoMeterControl.java line 82)
                 if (Math.Abs(x - 128) <= 1 && Math.Abs(y - 128) <= 1) continue;
-                if (_densityGrid[x, y] > maxCount)
-                    maxCount = _densityGrid[x, y];
+                int count = grid[colBase + y];
+                if (count > maxCount)
+                    maxCount = count;
             }
         }
 
@@ -307,7 +392,7 @@ public sealed class StereoAnalyzer
         {
             for (int x = 0; x < DensityGridSize; x++)
             {
-                int count = _densityGrid[x, y];
+                int count = grid[x * DensityGridSize + y];
                 if (count > 0)
                 {
                     double norm = 10000.0 * ((double)count / maxCount);
@@ -363,6 +448,6 @@ public sealed class StereoAnalyzer
         _sampleCount = 0;
         _smoothedCorrelation = 1.0;
         _livePointsCount = 0;
-        Array.Clear(_densityGrid, 0, _densityGrid.Length);
+        Array.Clear(_densityGrid);
     }
 }

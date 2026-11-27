@@ -13,9 +13,15 @@ namespace MusicScope.Audio;
 /// Universal cross-platform audio decoder using native FFmpeg.
 /// Streams decoded 32-bit floating-point audio data for WAV, AIFF, FLAC, ALAC, MP3, AAC, DSD, OGG, etc.
 /// </summary>
-public sealed class FfmpegAudioDecoder : IAudioDecoder
+public sealed partial class FfmpegAudioDecoder : IAudioDecoder
 {
     private readonly string _ffmpegPath;
+
+    [GeneratedRegex(@"Duration:\s*(\d+):(\d+):(\d+(?:\.\d+)?)")]
+    private static partial Regex DurationRegex();
+
+    [GeneratedRegex(@"Audio:\s*[^,]+,\s*(\d+)\s*Hz,\s*([^,]+),\s*([^,]+)")]
+    private static partial Regex AudioStreamRegex();
 
     public FfmpegAudioDecoder(string? customFfmpegPath = null)
     {
@@ -78,20 +84,20 @@ public sealed class FfmpegAudioDecoder : IAudioDecoder
         string format = Path.GetExtension(filePath).TrimStart('.').ToUpperInvariant();
 
         // Parse Duration: 00:03:45.67
-        var durMatch = Regex.Match(output, @"Duration:\s*(\d+):(\d+):(\d+(?:\.\d+)?)");
+        var durMatch = DurationRegex().Match(output);
         if (durMatch.Success)
         {
-            int h = int.Parse(durMatch.Groups[1].Value);
-            int m = int.Parse(durMatch.Groups[2].Value);
-            double s = double.Parse(durMatch.Groups[3].Value, CultureInfo.InvariantCulture);
+            int h = int.Parse(durMatch.Groups[1].ValueSpan, CultureInfo.InvariantCulture);
+            int m = int.Parse(durMatch.Groups[2].ValueSpan, CultureInfo.InvariantCulture);
+            double s = double.Parse(durMatch.Groups[3].ValueSpan, CultureInfo.InvariantCulture);
             duration = TimeSpan.FromSeconds(h * 3600 + m * 60 + s);
         }
 
         // Parse Audio: ..., 44100 Hz, stereo, s16, ...
-        var audioMatch = Regex.Match(output, @"Audio:\s*[^,]+,\s*(\d+)\s*Hz,\s*([^,]+),\s*([^,]+)");
+        var audioMatch = AudioStreamRegex().Match(output);
         if (audioMatch.Success)
         {
-            sampleRate = double.Parse(audioMatch.Groups[1].Value, CultureInfo.InvariantCulture);
+            sampleRate = double.Parse(audioMatch.Groups[1].ValueSpan, CultureInfo.InvariantCulture);
             string chStr = audioMatch.Groups[2].Value.Trim().ToLowerInvariant();
             channels = chStr switch
             {
@@ -130,12 +136,19 @@ public sealed class FfmpegAudioDecoder : IAudioDecoder
         CancellationToken ct = default)
     {
         AudioFileInfo info = await ProbeAsync(filePath, ct);
+        await DecodeAsync(info, onChunkDecoded, ct);
+    }
 
+    public async Task DecodeAsync(
+        AudioFileInfo info,
+        AudioChunkDecodedHandler onChunkDecoded,
+        CancellationToken ct = default)
+    {
         var psi = new ProcessStartInfo
         {
             FileName = _ffmpegPath,
             // Stream interleaved 32-bit floating point PCM directly to pipe:1 (standard output)
-            Arguments = $"-v error -i \"{filePath}\" -f f32le -ac {info.ChannelCount} pipe:1",
+            Arguments = $"-v error -i \"{info.FilePath}\" -f f32le -ac {info.ChannelCount} pipe:1",
             RedirectStandardOutput = true,
             UseShellExecute = false,
             CreateNoWindow = true
@@ -165,7 +178,7 @@ public sealed class FfmpegAudioDecoder : IAudioDecoder
                 Buffer.BlockCopy(rawBuffer, 0, floatBuffer, 0, floatCount * sizeof(float));
 
                 totalSamplesRead += floatCount;
-                double progress = expectedTotalSamples > 0 
+                double progress = expectedTotalSamples > 0
                     ? Math.Min(1.0, (double)totalSamplesRead / expectedTotalSamples)
                     : 0.0;
 

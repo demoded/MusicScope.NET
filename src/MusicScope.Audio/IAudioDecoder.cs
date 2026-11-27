@@ -30,4 +30,12 @@ public interface IAudioDecoder
         string filePath,
         AudioChunkDecodedHandler onChunkDecoded,
         CancellationToken ct = default);
+
+    /// <summary>
+    /// Decodes a previously probed audio file without re-probing metadata.
+    /// </summary>
+    Task DecodeAsync(
+        AudioFileInfo probedInfo,
+        AudioChunkDecodedHandler onChunkDecoded,
+        CancellationToken ct = default) => DecodeAsync(probedInfo.FilePath, onChunkDecoded, ct);
 }

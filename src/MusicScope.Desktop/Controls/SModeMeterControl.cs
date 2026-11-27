@@ -139,6 +139,56 @@ public sealed class SModeMeterControl : Control
     private static readonly IPen AmberHistogramPen = new Pen(new SolidColorBrush(Color.FromRgb(232, 154, 32)), 1);
     private static readonly IPen BracketPen = new Pen(new SolidColorBrush(Color.FromRgb(255, 255, 255)), 1.5);
 
+    private static readonly double[] DbMarks = [3.0, 0.0, -3.0, -6.0, -12.0, -20.0, -30.0, -40.0, -50.0, -60.0];
+    private static readonly double[] DbMarkNorms = InitializeDbMarkNorms();
+    private static readonly FormattedText[] DbMarkTexts =
+    [
+        CreateText("3", 9, ScaleRedBrush),
+        CreateText("0", 9, ScaleRedBrush),
+        CreateText("-3", 9, ScaleGrayBrush),
+        CreateText("-6", 9, ScaleGrayBrush),
+        CreateText("-12", 9, ScaleGrayBrush),
+        CreateText("-20", 9, ScaleGrayBrush),
+        CreateText("-30", 9, ScaleGrayBrush),
+        CreateText("-40", 9, ScaleGrayBrush),
+        CreateText("-50", 9, ScaleGrayBrush),
+        CreateText("-60", 9, ScaleGrayBrush),
+    ];
+    private static readonly double[] HistoBinNorms = InitializeHistoBinNorms();
+
+    private static readonly FormattedText LabelLText = CreateText("L", 11, LabelGrayBrush);
+    private static readonly FormattedText LabelRText = CreateText("R", 11, LabelGrayBrush);
+    private static readonly FormattedText LabelMText = CreateText("M", 11, LabelRedBrush);
+    private static readonly FormattedText LabelSText = CreateText("S", 11, LabelRedBrush);
+    private static readonly FormattedText LabelLuText = CreateText("LU", 11, LabelGrayBrush);
+    private static readonly FormattedText HeaderSModeText = CreateText("S-Mode", 11, SModeHeaderBrush);
+    private static readonly FormattedText HeaderMModeText = CreateText("M-Mode", 11, MModeHeaderBrush);
+    private static readonly FormattedText HeaderTplText = CreateText("TPL", 11, TplHeaderBrush);
+
+    private static FormattedText CreateText(string text, double size, IBrush brush) =>
+        new(text, CultureInfo.InvariantCulture, FlowDirection.LeftToRight, Typeface.Default, size, brush);
+
+    private static double[] InitializeDbMarkNorms()
+    {
+        var norms = new double[DbMarks.Length];
+        for (int i = 0; i < DbMarks.Length; i++)
+        {
+            norms[i] = (Math.Pow(10.0, (DbMarks[i] + 60.0) / 90.0) - 1.0) / 4.011872336;
+        }
+        return norms;
+    }
+
+    private static double[] InitializeHistoBinNorms()
+    {
+        var norms = new double[631]; // -600..30 tenths of dB
+        for (int i = -600; i <= 30; i++)
+        {
+            double db = i / 10.0;
+            norms[i + 600] = (Math.Pow(10.0, (db + 60.0) / 90.0) - 1.0) / 4.011872336;
+        }
+        return norms;
+    }
+
     private double _decayLeft = -60.0;
     private double _decayRight = -60.0;
 
@@ -191,25 +241,17 @@ public sealed class SModeMeterControl : Control
             return bottomY - norm * meterH;
         }
 
-        // dB Scale grid lines & labels: 3, 0, -3, -6, -12, -20, -30, -40, -50, -60
-        double[] dbMarks = [3.0, 0.0, -3.0, -6.0, -12.0, -20.0, -30.0, -40.0, -50.0, -60.0];
-        string[] dbLabels = ["3", "0", "-3", "-6", "-12", "-20", "-30", "-40", "-50", "-60"];
-
         double gridLeft = 30.0;
         double gridRight = 89.0;
 
         // 1. Grid lines and dB Scale labels
-        for (int i = 0; i < dbMarks.Length; i++)
+        for (int i = 0; i < DbMarks.Length; i++)
         {
-            double db = dbMarks[i];
-            double y = DbToY(db);
-
-            bool isRed = i <= 1; // 3 and 0 dB are red
-            IPen linePen = isRed ? RedGridPen : DimGridPen;
-            IBrush textBrush = isRed ? ScaleRedBrush : ScaleGrayBrush;
-
+            double y = bottomY - DbMarkNorms[i] * meterH;
+            IPen linePen = i <= 1 ? RedGridPen : DimGridPen;
             context.DrawLine(linePen, new Point(gridLeft, y), new Point(gridRight, y));
-            DrawTextRight(context, dbLabels[i], tf, 9, textBrush, gridLeft - 5, y - 5);
+            var ft = DbMarkTexts[i];
+            context.DrawText(ft, new Point(gridLeft - 5 - ft.Width, y - 5));
         }
 
         // 2. Active Channel Levels & Decay
@@ -333,31 +375,24 @@ public sealed class SModeMeterControl : Control
         }
 
         // 4. Bottom Channel Labels: LevelMeterControl.java lines 276-286
-        IBrush channelLabelBrush = isMidSide ? LabelRedBrush : LabelGrayBrush;
-        string leftLabel = isMidSide ? "M" : "L";
-        string rightLabel = isMidSide ? "S" : "R";
+        FormattedText leftLabelFt = isMidSide ? LabelMText : LabelLText;
+        FormattedText rightLabelFt = isMidSide ? LabelSText : LabelRText;
 
-        DrawCenteredText(context, leftLabel, tf, 11, channelLabelBrush, barL_X + barL_W / 2.0, bottomY + 4);
-        DrawCenteredText(context, rightLabel, tf, 11, channelLabelBrush, barR_X + barR_W / 2.0, bottomY + 4);
-        DrawCenteredText(context, "LU", tf, 11, LabelGrayBrush, barLU_X + barLU_W / 2.0, bottomY + 4);
+        context.DrawText(leftLabelFt, new Point(barL_X + barL_W / 2.0 - leftLabelFt.Width / 2.0, bottomY + 4));
+        context.DrawText(rightLabelFt, new Point(barR_X + barR_W / 2.0 - rightLabelFt.Width / 2.0, bottomY + 4));
+        context.DrawText(LabelLuText, new Point(barLU_X + barLU_W / 2.0 - LabelLuText.Width / 2.0, bottomY + 4));
 
         // 5. Histogram Section & Header: LevelMeterControl.java lines 216-274
         double histoLeft = 105.0;
         double maxHistoW = Math.Max(25.0, width - histoLeft - 18);
 
-        string headerText = MeterMode switch
+        FormattedText headerFt = MeterMode switch
         {
-            1 => "M-Mode",
-            2 => "TPL",
-            _ => "S-Mode"
+            1 => HeaderMModeText,
+            2 => HeaderTplText,
+            _ => HeaderSModeText
         };
-        IBrush headerBrush = MeterMode switch
-        {
-            1 => MModeHeaderBrush,
-            2 => TplHeaderBrush,
-            _ => SModeHeaderBrush
-        };
-        DrawTextRight(context, headerText, tf, 11, headerBrush, histoLeft + maxHistoW, 8);
+        context.DrawText(headerFt, new Point(histoLeft + maxHistoW - headerFt.Width, 8));
 
         // Vertical baseline for histogram (LevelMeterControl.java line 255)
         context.DrawLine(AmberHistogramPen, new Point(histoLeft, DbToY(3.0)), new Point(histoLeft, bottomY));
@@ -368,6 +403,7 @@ public sealed class SModeMeterControl : Control
 
         if (hist != null && maxCount > 0)
         {
+            double invMaxScale = maxHistoW / maxCount;
             for (int i = -600; i <= 30; i++)
             {
                 int bin = i + 700;
@@ -376,11 +412,10 @@ public sealed class SModeMeterControl : Control
                     int count = hist[bin];
                     if (count > 0)
                     {
-                        double db = i / 10.0;
-                        double y = DbToY(db);
-                        double w = (double)count / maxCount * maxHistoW;
+                        double w = count * invMaxScale;
                         if (w > 0.5)
                         {
+                            double y = bottomY - HistoBinNorms[i + 600] * meterH;
                             context.DrawLine(AmberHistogramPen, new Point(histoLeft, y), new Point(histoLeft + w, y));
                         }
                     }

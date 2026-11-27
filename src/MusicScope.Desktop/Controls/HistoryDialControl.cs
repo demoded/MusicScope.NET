@@ -65,6 +65,49 @@ public sealed class HistoryDialControl : Control
     private static readonly IPen OrangeWaveformPen = new Pen(OrangeWaveformBrush, 1.2);
     private static readonly IPen NeedlePen = new Pen(LabelBrush, 1);
 
+    private static readonly double[] RingDbs = [3.0, 0.0, -6.0, -12.0, -24.0, -40.0, -60.0];
+    private static readonly double MaxFactor = Math.Pow(10.0, (3.0 + 60.0) / 90.0) - 1.0;
+    private static readonly double[] RingNorms = InitializeRingNorms();
+    private static readonly (double Cos, double Sin)[] UnitAngles = InitializeUnitAngles();
+
+    private static readonly FormattedText HeaderText = CreateText("History", Typeface.Default, 11, HeaderBrush);
+    private static readonly FormattedText PlText = CreateText("P/L", Typeface.Default, 10, LabelBrush);
+    private static readonly FormattedText PlrText = CreateText("PLR", Typeface.Default, 10, DimLabelBrush);
+    private static readonly FormattedText[] RingLabelTexts =
+    [
+        CreateText("3", ScaleTypeface, 10.5, ScaleRedBrush),
+        CreateText("0", ScaleTypeface, 10.5, ScaleRedBrush),
+        CreateText("-6", ScaleTypeface, 10.5, ScaleWhiteBrush),
+        CreateText("-12", ScaleTypeface, 10.5, ScaleWhiteBrush),
+        CreateText("-24", ScaleTypeface, 10.5, ScaleWhiteBrush),
+        CreateText("-40", ScaleTypeface, 10.5, ScaleWhiteBrush),
+        CreateText("-60", ScaleTypeface, 10.5, ScaleWhiteBrush),
+    ];
+
+    private static FormattedText CreateText(string text, Typeface tf, double size, IBrush brush) =>
+        new(text, CultureInfo.InvariantCulture, FlowDirection.LeftToRight, tf, size, brush);
+
+    private static double[] InitializeRingNorms()
+    {
+        var norms = new double[RingDbs.Length];
+        for (int i = 0; i < RingDbs.Length; i++)
+        {
+            norms[i] = (Math.Pow(10.0, (RingDbs[i] + 60.0) / 90.0) - 1.0) / MaxFactor;
+        }
+        return norms;
+    }
+
+    private static (double Cos, double Sin)[] InitializeUnitAngles()
+    {
+        var angles = new (double, double)[512];
+        for (int i = 0; i < 512; i++)
+        {
+            double angleRad = (i / 512.0) * (2.0 * Math.PI) - Math.PI / 2.0;
+            angles[i] = (Math.Cos(angleRad), Math.Sin(angleRad));
+        }
+        return angles;
+    }
+
     static HistoryDialControl()
     {
         AffectsRender<HistoryDialControl>(PeakHistoryProperty, LoudnessHistoryProperty, TrackProgressProperty);
@@ -79,9 +122,9 @@ public sealed class HistoryDialControl : Control
         var tf = Typeface.Default;
 
         // Labels
-        DrawText(context, "History", tf, 11, HeaderBrush, 8, 8);
-        DrawText(context, "P/L", tf, 10, LabelBrush, 8, 26);
-        DrawText(context, "PLR", tf, 10, DimLabelBrush, 8, height - 20);
+        context.DrawText(HeaderText, new Point(8, 8));
+        context.DrawText(PlText, new Point(8, 26));
+        context.DrawText(PlrText, new Point(8, height - 20));
 
         // Center of circle
         double centerX = width / 2.0;
@@ -91,21 +134,19 @@ public sealed class HistoryDialControl : Control
 
         // Formula from decompiled CircleControl.java:
         // radius = maxRadius * (Math.Pow(10.0, (dB + 60.0) / 90.0) - 1.0) / (Math.Pow(10.0, (3.0 + 60.0) / 90.0) - 1.0);
-        double maxFactor = Math.Pow(10.0, (3.0 + 60.0) / 90.0) - 1.0;
+        double invMaxFactor = maxRadius / MaxFactor;
         double DbToRadius(double db)
         {
-            double clamped = Math.Clamp(db, -60.0, 3.0);
+            double clamped = db < -60.0 ? -60.0 : (db > 3.0 ? 3.0 : db);
             double factor = Math.Pow(10.0, (clamped + 60.0) / 90.0) - 1.0;
-            return Math.Max(0, maxRadius * (factor / maxFactor));
+            double r = factor * invMaxFactor;
+            return r > 0.0 ? r : 0.0;
         }
 
         // Concentric rings & 12 o'clock labels: 3, 0, -6, -12, -24, -40, -60
-        double[] ringDbs = [3.0, 0.0, -6.0, -12.0, -24.0, -40.0, -60.0];
-        string[] ringLabels = ["3", "0", "-6", "-12", "-24", "-40", "-60"];
-
-        for (int i = 0; i < ringDbs.Length; i++)
+        for (int i = 0; i < RingDbs.Length; i++)
         {
-            double r = DbToRadius(ringDbs[i]);
+            double r = maxRadius * RingNorms[i];
             if (r > 1)
             {
                 IPen pen = i == 0 ? RedOuterPen : (i == 1 ? RedZeroPen : RingPen);
@@ -126,32 +167,79 @@ public sealed class HistoryDialControl : Control
         int pointsToDraw = TrackProgress >= 1.0 ? points : Math.Clamp((int)(TrackProgress * points), 0, points);
         if (pointsToDraw < 2) return;
 
-        Point? prevPeakPt = null;
-        Point? prevLoudnessPt = null;
+        bool useUnitTable = points == 512;
+        var loudGeom = new StreamGeometry();
+        var greenGeom = new StreamGeometry();
+        bool hasRedSegments = false;
 
-        for (int i = 0; i < pointsToDraw; i++)
+        using (var lc = loudGeom.Open())
+        using (var gc = greenGeom.Open())
         {
-            // Angle around circle: starts at top (12 o'clock) and rotates clockwise
-            double angleRad = (i / (double)points) * (2.0 * Math.PI) - Math.PI / 2.0;
-
-            double pDb = peaks[i];
-            double lDb = loudness[i];
-
-            double rPeak = DbToRadius(pDb);
-            double rLoud = DbToRadius(lDb);
-
-            Point ptPeak = new Point(centerX + rPeak * Math.Cos(angleRad), centerY + rPeak * Math.Sin(angleRad));
-            Point ptLoud = new Point(centerX + rLoud * Math.Cos(angleRad), centerY + rLoud * Math.Sin(angleRad));
-
-            if (prevPeakPt.HasValue)
+            for (int i = 0; i < pointsToDraw; i++)
             {
-                IPen peakPen = pDb > 0.0 ? RedWaveformPen : GreenWaveformPen;
-                context.DrawLine(peakPen, prevPeakPt.Value, ptPeak);
-                context.DrawLine(OrangeWaveformPen, prevLoudnessPt!.Value, ptLoud);
-            }
+                double cos, sin;
+                if (useUnitTable)
+                {
+                    (cos, sin) = UnitAngles[i];
+                }
+                else
+                {
+                    double angleRad = (i / (double)points) * (2.0 * Math.PI) - Math.PI / 2.0;
+                    cos = Math.Cos(angleRad);
+                    sin = Math.Sin(angleRad);
+                }
 
-            prevPeakPt = ptPeak;
-            prevLoudnessPt = ptLoud;
+                double pDb = peaks[i];
+                double lDb = loudness[i];
+
+                double rPeak = DbToRadius(pDb);
+                double rLoud = DbToRadius(lDb);
+
+                Point ptPeak = new Point(centerX + rPeak * cos, centerY + rPeak * sin);
+                Point ptLoud = new Point(centerX + rLoud * cos, centerY + rLoud * sin);
+
+                if (i == 0)
+                {
+                    lc.BeginFigure(ptLoud, false);
+                    gc.BeginFigure(ptPeak, false);
+                }
+                else
+                {
+                    lc.LineTo(ptLoud);
+                    gc.LineTo(ptPeak);
+                    if (pDb > 0.0) hasRedSegments = true;
+                }
+            }
+            lc.EndFigure(false);
+            gc.EndFigure(false);
+        }
+
+        context.DrawGeometry(null, OrangeWaveformPen, loudGeom);
+        context.DrawGeometry(null, GreenWaveformPen, greenGeom);
+
+        if (hasRedSegments)
+        {
+            Point? prevPt = null;
+            for (int i = 0; i < pointsToDraw; i++)
+            {
+                double cos, sin;
+                if (useUnitTable)
+                    (cos, sin) = UnitAngles[i];
+                else
+                {
+                    double angleRad = (i / (double)points) * (2.0 * Math.PI) - Math.PI / 2.0;
+                    cos = Math.Cos(angleRad);
+                    sin = Math.Sin(angleRad);
+                }
+                double pDb = peaks[i];
+                double rPeak = DbToRadius(pDb);
+                Point ptPeak = new Point(centerX + rPeak * cos, centerY + rPeak * sin);
+                if (prevPt.HasValue && pDb > 0.0)
+                {
+                    context.DrawLine(RedWaveformPen, prevPt.Value, ptPeak);
+                }
+                prevPt = ptPeak;
+            }
         }
 
         // Current track progress needle (subtle spoke while actively analyzing)
@@ -163,11 +251,10 @@ public sealed class HistoryDialControl : Control
         }
 
         // Scale labels at 12 o'clock drawn on TOP of rings, spokes, and waveforms (center-aligned vertically along radial axis)
-        for (int i = 0; i < ringDbs.Length; i++)
+        for (int i = 0; i < RingDbs.Length; i++)
         {
-            double r = DbToRadius(ringDbs[i]);
-            IBrush tb = (i == 0 || i == 1) ? ScaleRedBrush : ScaleWhiteBrush;
-            var ft = new FormattedText(ringLabels[i], CultureInfo.InvariantCulture, FlowDirection.LeftToRight, ScaleTypeface, 10.5, tb);
+            double r = maxRadius * RingNorms[i];
+            var ft = RingLabelTexts[i];
 
             double textX = centerX - ft.Width / 2.0;
             double textY = centerY - r - ft.Height / 2.0;
