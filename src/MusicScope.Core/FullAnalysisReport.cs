@@ -23,6 +23,7 @@ public record FullAnalysisReport
     public LoudnessResult Loudness { get; init; } = new();
     public LevelsResult Levels { get; init; } = new();
     public StereoResult Stereo { get; init; } = new();
+    public SpectrumAnalysisMode AnalysisMode { get; init; } = SpectrumAnalysisMode.Original;
 
     /// <summary>
     /// Average frequency spectrum in dBFS (size / 2 frequency bins).

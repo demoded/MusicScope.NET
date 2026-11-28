@@ -17,21 +17,25 @@ public sealed class AudioAnalysisEngine
 {
     private readonly double _sampleRate;
     private readonly int _channelCount;
+    private readonly SpectrumAnalysisMode _analysisMode;
 
     private readonly LoudnessMeter _loudnessMeter;
     private readonly TruePeakMeter _truePeakMeter;
     private readonly StereoAnalyzer _stereoAnalyzer;
-    private readonly SpectrumAnalyzer _linearSpectrum;
+    private readonly SpectrumAnalyzer? _linearSpectrum;
     private readonly SpectrumAnalyzer _logSpectrum;
 
     private const int FftSize = 2048;
+    private const int OverlappingFftSize = 8192;
     private readonly int _fftStride;
     private int _framesSinceLastFft;
     private int _bufferedFrames;
     private int _ringBufferPos;
-    private readonly double[] _ringBufferLeft = new double[FftSize];
-    private readonly double[] _ringBufferRight = new double[FftSize];
+    private readonly double[] _ringBufferLeft;
+    private readonly double[] _ringBufferRight;
     private int _spectrumFftCount;
+
+    public SpectrumAnalysisMode AnalysisMode => _analysisMode;
 
     private readonly float[] _goniometerX = new float[StereoAnalyzer.LivePointCount];
     private readonly float[] _goniometerY = new float[StereoAnalyzer.LivePointCount];
@@ -75,19 +79,35 @@ public sealed class AudioAnalysisEngine
         set => _totalFrames = value;
     }
 
-    public AudioAnalysisEngine(double sampleRate = 44100.0, int channelCount = 2, long totalFrames = 0)
+    public AudioAnalysisEngine(
+        double sampleRate = 44100.0,
+        int channelCount = 2,
+        long totalFrames = 0,
+        SpectrumAnalysisMode analysisMode = SpectrumAnalysisMode.Original)
     {
         _sampleRate = sampleRate;
         _channelCount = channelCount;
         _totalFrames = totalFrames;
+        _analysisMode = analysisMode;
 
         _loudnessMeter = new LoudnessMeter(sampleRate, channelCount);
         _truePeakMeter = new TruePeakMeter(channelCount, sampleRate);
         _stereoAnalyzer = new StereoAnalyzer();
 
         _fftStride = Math.Max(FftSize, (int)(sampleRate * 0.050));
-        _linearSpectrum = new SpectrumAnalyzer(FftSize, sampleRate);
-        _logSpectrum = new SpectrumAnalyzer(8192, sampleRate);
+        if (analysisMode == SpectrumAnalysisMode.Overlapping)
+        {
+            _ringBufferLeft = [];
+            _ringBufferRight = [];
+            _logSpectrum = new SpectrumAnalyzer(OverlappingFftSize, sampleRate, continuousCoverage: true);
+        }
+        else
+        {
+            _ringBufferLeft = new double[FftSize];
+            _ringBufferRight = new double[FftSize];
+            _linearSpectrum = new SpectrumAnalyzer(FftSize, sampleRate);
+            _logSpectrum = new SpectrumAnalyzer(OverlappingFftSize, sampleRate);
+        }
         Array.Fill(_peakHistory, -60.0);
         Array.Fill(_loudnessHistory, -60.0);
     }
@@ -105,39 +125,57 @@ public sealed class AudioAnalysisEngine
             _stereoAnalyzer.ProcessInterleaved(interleavedSamples);
         }
 
-        // Feed circular buffers and execute FFT every 50ms (matching MusicScope SystemController.java & SpectrumModule.java)
+        // Feed circular buffers and execute FFT
         int frameCount = interleavedSamples.Length / _channelCount;
-        int frameOffset = 0;
-        while (frameOffset < frameCount)
+        if (_analysisMode == SpectrumAnalysisMode.Overlapping)
         {
-            int remaining = frameCount - frameOffset;
-            int toStride = _fftStride - _framesSinceLastFft;
-            int step = toStride > 0 ? Math.Min(remaining, toStride) : 1;
-
-            if (_framesSinceLastFft < FftSize)
+            int frameOffset = 0;
+            while (frameOffset < frameCount)
             {
-                int ringFill = Math.Min(step, FftSize - _framesSinceLastFft);
-                for (int i = 0; i < ringFill; i++)
+                int step = Math.Min(frameCount - frameOffset, _logSpectrum.FramesUntilNextExecute);
+                int prevCount = _logSpectrum.ExecutionCount;
+                _logSpectrum.Process(interleavedSamples.Slice(frameOffset * _channelCount, step * _channelCount), _channelCount);
+                if (_logSpectrum.ExecutionCount > prevCount)
                 {
-                    int sampleIdx = (frameOffset + i) * _channelCount;
-                    float left = interleavedSamples[sampleIdx];
-                    float right = _channelCount >= 2 ? interleavedSamples[sampleIdx + 1] : left;
-                    _ringBufferLeft[_ringBufferPos] = left;
-                    _ringBufferRight[_ringBufferPos] = right;
-                    if (++_ringBufferPos >= FftSize) _ringBufferPos = 0;
+                    RecordOverlappingSpectrogramRow(_processedFrames + frameOffset + step - 1);
                 }
-                _bufferedFrames += ringFill;
+                frameOffset += step;
             }
-
-            _logSpectrum.Process(interleavedSamples.Slice(frameOffset * _channelCount, step * _channelCount), _channelCount);
-            _framesSinceLastFft += step;
-
-            if (_bufferedFrames >= FftSize && _framesSinceLastFft >= _fftStride)
+        }
+        else
+        {
+            int frameOffset = 0;
+            while (frameOffset < frameCount)
             {
-                ExecuteFft(_processedFrames + frameOffset + step - 1);
-            }
+                int remaining = frameCount - frameOffset;
+                int toStride = _fftStride - _framesSinceLastFft;
+                int step = toStride > 0 ? Math.Min(remaining, toStride) : 1;
 
-            frameOffset += step;
+                if (_framesSinceLastFft < FftSize)
+                {
+                    int ringFill = Math.Min(step, FftSize - _framesSinceLastFft);
+                    for (int i = 0; i < ringFill; i++)
+                    {
+                        int sampleIdx = (frameOffset + i) * _channelCount;
+                        float left = interleavedSamples[sampleIdx];
+                        float right = _channelCount >= 2 ? interleavedSamples[sampleIdx + 1] : left;
+                        _ringBufferLeft[_ringBufferPos] = left;
+                        _ringBufferRight[_ringBufferPos] = right;
+                        if (++_ringBufferPos >= FftSize) _ringBufferPos = 0;
+                    }
+                    _bufferedFrames += ringFill;
+                }
+
+                _logSpectrum.Process(interleavedSamples.Slice(frameOffset * _channelCount, step * _channelCount), _channelCount);
+                _framesSinceLastFft += step;
+
+                if (_bufferedFrames >= FftSize && _framesSinceLastFft >= _fftStride)
+                {
+                    ExecuteFft(_processedFrames + frameOffset + step - 1);
+                }
+
+                frameOffset += step;
+            }
         }
 
         // Update polar history dial (512 radial bins)
@@ -190,20 +228,45 @@ public sealed class AudioAnalysisEngine
     /// </summary>
     public AudioRealtimeSnapshot GetRealtimeSnapshot(double progress = 0.0)
     {
-        SpectrumFrame linearFrame = _linearSpectrum.Capture();
+        SpectrumFrame linearFrame;
+        SpectrumFrame logFrame;
         double[] spectrumCopy;
         double[] peakHoldCopy;
-        if (_spectrumFftCount > 0)
+
+        if (_analysisMode == SpectrumAnalysisMode.Overlapping)
         {
-            spectrumCopy = linearFrame.InstantDb;
-            peakHoldCopy = linearFrame.PeakDb;
+            logFrame = _logSpectrum.Capture();
+            linearFrame = logFrame;
+            if (_spectrumFftCount > 0)
+            {
+                spectrumCopy = logFrame.InstantDb;
+                peakHoldCopy = logFrame.PeakDb;
+            }
+            else
+            {
+                int bins = OverlappingFftSize / 2;
+                spectrumCopy = new double[bins];
+                peakHoldCopy = new double[bins];
+                Array.Fill(spectrumCopy, -140.0);
+                Array.Fill(peakHoldCopy, -140.0);
+            }
         }
         else
         {
-            spectrumCopy = new double[FftSize / 2];
-            peakHoldCopy = new double[FftSize / 2];
-            Array.Fill(spectrumCopy, -140.0);
-            Array.Fill(peakHoldCopy, -140.0);
+            linearFrame = _linearSpectrum!.Capture();
+            logFrame = _logSpectrum.Capture();
+            if (_spectrumFftCount > 0)
+            {
+                spectrumCopy = linearFrame.InstantDb;
+                peakHoldCopy = linearFrame.PeakDb;
+            }
+            else
+            {
+                spectrumCopy = new double[FftSize / 2];
+                peakHoldCopy = new double[FftSize / 2];
+                Array.Fill(spectrumCopy, -140.0);
+                Array.Fill(peakHoldCopy, -140.0);
+            }
         }
 
         float[] gonioX = new float[_goniometerX.Length];
@@ -246,7 +309,7 @@ public sealed class AudioAnalysisEngine
             InstantSpectrumDb = spectrumCopy,
             CumulativePeakSpectrumDb = peakHoldCopy,
             LinearSpectrum = linearFrame,
-            LogSpectrum = _logSpectrum.Capture(),
+            LogSpectrum = logFrame,
             PeakHistory = peakHistoryCopy,
             LoudnessHistory = loudnessHistoryCopy,
             SpectrogramMax = _spectrogramMax,
@@ -267,7 +330,7 @@ public sealed class AudioAnalysisEngine
 
         // The reference fills its ring on the first interval and starts smoothing on the next.
         if (_spectrumFftCount > 0)
-            _linearSpectrum.ProcessRingWindow(_ringBufferLeft, _ringBufferRight, _ringBufferPos);
+            _linearSpectrum!.ProcessRingWindow(_ringBufferLeft, _ringBufferRight, _ringBufferPos);
 
         // Determine row in 250-row spectrogram
         // matching MusicScope WaterfallControl.java lines 344-350
@@ -282,7 +345,7 @@ public sealed class AudioAnalysisEngine
         for (int b = 0; b < FftSize / 2; b++)
         {
             // Accumulate linear magnitude into 2D spectrogram buffers (250 rows x 1024 cols).
-            float linMag = (float)_linearSpectrum.GetMagnitude(b);
+            float linMag = (float)_linearSpectrum!.GetMagnitude(b);
             int idx = rowOffset + b;
             if (isFirstInRow)
             {
@@ -321,15 +384,86 @@ public sealed class AudioAnalysisEngine
         _spectrumFftCount++;
     }
 
+    private void RecordOverlappingSpectrogramRow(long currentFrame)
+    {
+        int specRow = _totalFrames > 0
+            ? Math.Clamp((int)((double)currentFrame / _totalFrames * SpectrogramRows), 0, SpectrogramRows - 1)
+            : Math.Clamp(_spectrumFftCount % SpectrogramRows, 0, SpectrogramRows - 1);
+
+        int rowOffset = specRow * SpectrogramCols;
+        bool isFirstInRow = (_spectrogramRowCount[specRow] == 0);
+        _spectrogramRowCount[specRow]++;
+
+        // Collapse 4,096 linear FFT bins (4 bins per spectrogram column) into 1,024 columns
+        // preserving narrowband peaks (max), energy average (avg), and floor (min).
+        for (int c = 0; c < SpectrogramCols; c++)
+        {
+            int binBase = c << 2;
+            float m0 = (float)_logSpectrum.GetMagnitude(binBase);
+            float m1 = (float)_logSpectrum.GetMagnitude(binBase + 1);
+            float m2 = (float)_logSpectrum.GetMagnitude(binBase + 2);
+            float m3 = (float)_logSpectrum.GetMagnitude(binBase + 3);
+
+            float colMax = Math.Max(Math.Max(m0, m1), Math.Max(m2, m3));
+            float colMin = Math.Min(Math.Min(m0, m1), Math.Min(m2, m3));
+            float colAvg = (m0 + m1 + m2 + m3) * 0.25f;
+
+            int idx = rowOffset + c;
+            if (isFirstInRow)
+            {
+                _spectrogramMax[idx] = colMax;
+                _spectrogramAvg[idx] = colAvg;
+                _spectrogramMin[idx] = colMin;
+            }
+            else
+            {
+                if (colMax > _spectrogramMax[idx]) _spectrogramMax[idx] = colMax;
+                if (colMin < _spectrogramMin[idx]) _spectrogramMin[idx] = colMin;
+                _spectrogramAvg[idx] += colAvg;
+            }
+        }
+
+        for (int n = 0; n < SpectrogramCols; n++)
+        {
+            int logBin = LogSpectrogramBinMap[n];
+            float logLinMag = (float)_logSpectrum.GetMagnitude(logBin);
+            int idx = rowOffset + n;
+            if (isFirstInRow)
+            {
+                _spectrogramLogMax[idx] = logLinMag;
+                _spectrogramLogAvg[idx] = logLinMag;
+                _spectrogramLogMin[idx] = logLinMag;
+            }
+            else
+            {
+                if (logLinMag > _spectrogramLogMax[idx]) _spectrogramLogMax[idx] = logLinMag;
+                if (logLinMag < _spectrogramLogMin[idx]) _spectrogramLogMin[idx] = logLinMag;
+                _spectrogramLogAvg[idx] += logLinMag;
+            }
+        }
+
+        _spectrumFftCount++;
+    }
+
     /// <summary>
     /// Generates the complete analysis report.
     /// </summary>
     public FullAnalysisReport GenerateReport(string title = "", string filePath = "", string format = "", TimeSpan duration = default, int bitDepth = 16)
     {
-        _logSpectrum.Finish();
-        if (_bufferedFrames >= FftSize && _framesSinceLastFft > 0)
+        if (_analysisMode == SpectrumAnalysisMode.Overlapping)
         {
-            ExecuteFft(_processedFrames);
+            if (_logSpectrum.Finish())
+            {
+                RecordOverlappingSpectrogramRow(_processedFrames);
+            }
+        }
+        else
+        {
+            _logSpectrum.Finish();
+            if (_bufferedFrames >= FftSize && _framesSinceLastFft > 0)
+            {
+                ExecuteFft(_processedFrames);
+            }
         }
 
         var loudnessResult = _loudnessMeter.CalculateResult();
@@ -337,16 +471,36 @@ public sealed class AudioAnalysisEngine
         var stereoResult = _channelCount >= 2 ? _stereoAnalyzer.CalculateResult() : new StereoResult();
 
         // MusicScope displays the full cumulative peak hold spectrum across the entire track
-        SpectrumFrame linearFrame = _linearSpectrum.Capture();
+        SpectrumFrame linearFrame;
+        SpectrumFrame logFrame;
         double[] finalSpectrumDb;
-        if (_spectrumFftCount > 0)
+        if (_analysisMode == SpectrumAnalysisMode.Overlapping)
         {
-            finalSpectrumDb = linearFrame.PeakDb;
+            logFrame = _logSpectrum.Capture();
+            linearFrame = logFrame;
+            if (_spectrumFftCount > 0)
+            {
+                finalSpectrumDb = logFrame.PeakDb;
+            }
+            else
+            {
+                finalSpectrumDb = new double[OverlappingFftSize / 2];
+                Array.Fill(finalSpectrumDb, -140.0);
+            }
         }
         else
         {
-            finalSpectrumDb = new double[FftSize / 2];
-            Array.Fill(finalSpectrumDb, -140.0);
+            linearFrame = _linearSpectrum!.Capture();
+            logFrame = _logSpectrum.Capture();
+            if (_spectrumFftCount > 0)
+            {
+                finalSpectrumDb = linearFrame.PeakDb;
+            }
+            else
+            {
+                finalSpectrumDb = new double[FftSize / 2];
+                Array.Fill(finalSpectrumDb, -140.0);
+            }
         }
 
         // Ensure trailing bins up to 511 are populated if decoding finished slightly early
@@ -378,9 +532,10 @@ public sealed class AudioAnalysisEngine
             Loudness = loudnessResult,
             Levels = levelsResult,
             Stereo = stereoResult,
+            AnalysisMode = _analysisMode,
             SpectrumMagnitudesDb = finalSpectrumDb,
             LinearSpectrum = linearFrame,
-            LogSpectrum = _logSpectrum.Capture(),
+            LogSpectrum = logFrame,
             PeakHistory = finalPeakHistory,
             LoudnessHistory = finalLoudnessHistory,
             SpectrogramMax = (float[])_spectrogramMax.Clone(),
@@ -401,7 +556,7 @@ public sealed class AudioAnalysisEngine
         _loudnessMeter.Reset();
         _truePeakMeter.Reset();
         _stereoAnalyzer.Reset();
-        _linearSpectrum.Reset();
+        _linearSpectrum?.Reset();
         _logSpectrum.Reset();
         _bufferedFrames = 0;
         _framesSinceLastFft = 0;
