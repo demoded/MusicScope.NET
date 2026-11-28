@@ -325,7 +325,7 @@ public partial class MainViewModel : ViewModelBase
             var sw = System.Diagnostics.Stopwatch.StartNew();
             long lastUiUpdateMs = 0;
 
-            await _decoder.DecodeAsync(path, (chunk, channels, sRate, progress) =>
+            await _decoder.DecodeAsync(info, (chunk, channels, sRate, progress) =>
             {
                 engine.ProcessAudioBlock(chunk.Span);
 

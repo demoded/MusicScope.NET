@@ -81,6 +81,22 @@ public sealed class LevelsBoxControl : Control
     private static readonly IBrush LoudnessWhiteBrush = new SolidColorBrush(Color.FromRgb(0xEE, 0xEE, 0xEE)); // #EEEEEE Light Gray
     private static readonly IPen DividerPen = new Pen(new SolidColorBrush(Color.FromRgb(50, 55, 60)), 1);
 
+    private static readonly FormattedText LevelsHeaderText = CreateText("Levels", 11, HeaderActiveBrush);
+    private static readonly FormattedText BitMonitorHeaderText = CreateText("Bit Monitor", 11, HeaderDimBrush);
+    private static readonly FormattedText TruePeakHeaderText = CreateText("True Peak Meter", 10, SubheaderBrush);
+    private static readonly FormattedText TplLabelText = CreateText("TPL", 11, LabelBrush);
+    private static readonly FormattedText RmsLabelText = CreateText("RMS", 11, LabelBrush);
+    private static readonly FormattedText CrestLabelText = CreateText("CREST", 11, LabelBrush);
+    private static readonly FormattedText PlrLabelText = CreateText("PLR", 11, LabelBrush);
+    private static readonly FormattedText LoudnessHeaderText = CreateText("Loudness Full Scale", 10, SubheaderBrush);
+    private static readonly FormattedText MLabelText = CreateText("M", 11, LabelBrush);
+    private static readonly FormattedText SLabelText = CreateText("S", 11, LabelBrush);
+    private static readonly FormattedText ILabelText = CreateText("I", 11, LabelBrush);
+    private static readonly FormattedText LraLabelText = CreateText("LRA", 11, LabelBrush);
+
+    private static FormattedText CreateText(string text, double size, IBrush brush) =>
+        new(text, CultureInfo.InvariantCulture, FlowDirection.LeftToRight, Typeface.Default, size, brush);
+
     static LevelsBoxControl()
     {
         AffectsRender<LevelsBoxControl>(
@@ -102,18 +118,18 @@ public sealed class LevelsBoxControl : Control
         double val2X = right;
 
         // 1. Top tabs: Levels (active green) | Bit Monitor (dim)
-        DrawText(context, "Levels", tf, 11, HeaderActiveBrush, left, 8);
-        DrawText(context, "Bit Monitor", tf, 11, HeaderDimBrush, left + 60, 8);
+        context.DrawText(LevelsHeaderText, new Point(left, 8));
+        context.DrawText(BitMonitorHeaderText, new Point(left + 60, 8));
 
         // 2. Section 1: True Peak Meter
         double y = 32;
-        DrawText(context, "True Peak Meter", tf, 10, SubheaderBrush, left, y);
+        context.DrawText(TruePeakHeaderText, new Point(left, y));
         y += 16;
         context.DrawLine(DividerPen, new Point(left, y), new Point(right, y));
         y += 6;
 
         // TPL
-        DrawText(context, "TPL", tf, 11, LabelBrush, left, y);
+        context.DrawText(TplLabelText, new Point(left, y));
         IBrush tplBrushL = TruePeakLeft < 0.05 ? TplNormalBrush : TplClipBrush;
         IBrush tplBrushR = TruePeakRight < 0.05 ? TplNormalBrush : TplClipBrush;
         DrawTextRight(context, FormatDb(TruePeakLeft), tf, 11, tplBrushL, val1X, y);
@@ -121,46 +137,46 @@ public sealed class LevelsBoxControl : Control
         y += 18;
 
         // RMS
-        DrawText(context, "RMS", tf, 11, LabelBrush, left, y);
+        context.DrawText(RmsLabelText, new Point(left, y));
         DrawTextRight(context, FormatDb(RmsLeft), tf, 11, RmsBrush, val1X, y);
         DrawTextRight(context, FormatDb(RmsRight), tf, 11, RmsBrush, val2X, y);
         y += 18;
 
         // CREST (XiVero gold #DDDD55)
-        DrawText(context, "CREST", tf, 11, LabelBrush, left, y);
+        context.DrawText(CrestLabelText, new Point(left, y));
         DrawTextRight(context, FormatVal(CrestFactor), tf, 11, CrestBrush, val1X, y);
         y += 18;
 
         // PLR (Peak to Loudness Ratio, cyan #55DDFF)
-        DrawText(context, "PLR", tf, 11, LabelBrush, left, y);
+        context.DrawText(PlrLabelText, new Point(left, y));
         DrawTextRight(context, FormatVal(Plr), tf, 11, PlrBrush, val1X, y);
         y += 24;
 
         // 3. Section 2: Loudness Full Scale
-        DrawText(context, "Loudness Full Scale", tf, 10, SubheaderBrush, left, y);
+        context.DrawText(LoudnessHeaderText, new Point(left, y));
         y += 16;
         context.DrawLine(DividerPen, new Point(left, y), new Point(right, y));
         y += 6;
 
         // M (Momentary: Current at Col 1, Max at Col 2, #009FC6)
-        DrawText(context, "M", tf, 11, LabelBrush, left, y);
+        context.DrawText(MLabelText, new Point(left, y));
         DrawTextRight(context, FormatDb(MomentaryCurrent), tf, 11, MomentaryBrush, val1X, y);
         DrawTextRight(context, FormatDb(MomentaryMax), tf, 11, MomentaryBrush, val2X, y);
         y += 18;
 
         // S (Short-term: Current at Col 1, Max at Col 2, #E89A20)
-        DrawText(context, "S", tf, 11, LabelBrush, left, y);
+        context.DrawText(SLabelText, new Point(left, y));
         DrawTextRight(context, FormatDb(ShortTermCurrent), tf, 11, ShortTermBrush, val1X, y);
         DrawTextRight(context, FormatDb(ShortTermMax), tf, 11, ShortTermBrush, val2X, y);
         y += 18;
 
         // I (Integrated: Col 1, #EEEEEE)
-        DrawText(context, "I", tf, 11, LabelBrush, left, y);
+        context.DrawText(ILabelText, new Point(left, y));
         DrawTextRight(context, FormatDb(IntegratedLoudness), tf, 11, LoudnessWhiteBrush, val1X, y);
         y += 18;
 
         // LRA (Loudness Range: Col 1, #EEEEEE)
-        DrawText(context, "LRA", tf, 11, LabelBrush, left, y);
+        context.DrawText(LraLabelText, new Point(left, y));
         DrawTextRight(context, FormatVal(LoudnessRange), tf, 11, LoudnessWhiteBrush, val1X, y);
     }
 

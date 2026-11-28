@@ -1,4 +1,6 @@
 using System;
+using System.Runtime.InteropServices;
+using System.Runtime.Intrinsics;
 using MusicScope.Core.DSP;
 using MusicScope.Core.Levels;
 using MusicScope.Core.Loudness;
@@ -19,8 +21,6 @@ public sealed class AudioAnalysisEngine
     private readonly LoudnessMeter _loudnessMeter;
     private readonly TruePeakMeter _truePeakMeter;
     private readonly StereoAnalyzer _stereoAnalyzer;
-    private readonly FastFourierTransform _fft;
-    private readonly double[] _fftWindow;
     private readonly SpectrumAnalyzer _linearSpectrum;
     private readonly SpectrumAnalyzer _logSpectrum;
 
@@ -31,12 +31,6 @@ public sealed class AudioAnalysisEngine
     private int _ringBufferPos;
     private readonly double[] _ringBufferLeft = new double[FftSize];
     private readonly double[] _ringBufferRight = new double[FftSize];
-    private readonly double[] _fftRealBufferLeft = new double[FftSize];
-    private readonly double[] _fftImagBufferLeft = new double[FftSize];
-    private readonly double[] _fftRealBufferRight = new double[FftSize];
-    private readonly double[] _fftImagBufferRight = new double[FftSize];
-    private readonly double[] _latestInstantSpectrumDb = new double[FftSize / 2];
-    private readonly double[] _peakHoldSpectrumDb = new double[FftSize / 2];
     private int _spectrumFftCount;
 
     private readonly float[] _goniometerX = new float[StereoAnalyzer.LivePointCount];
@@ -92,12 +86,8 @@ public sealed class AudioAnalysisEngine
         _stereoAnalyzer = new StereoAnalyzer();
 
         _fftStride = Math.Max(FftSize, (int)(sampleRate * 0.050));
-        _fft = new FastFourierTransform(FftSize);
-        _fftWindow = WindowFunctions.Create(WindowType.BlackmanHarris, FftSize);
         _linearSpectrum = new SpectrumAnalyzer(FftSize, sampleRate);
         _logSpectrum = new SpectrumAnalyzer(8192, sampleRate);
-        Array.Fill(_latestInstantSpectrumDb, -140.0);
-        Array.Fill(_peakHoldSpectrumDb, -140.0);
         Array.Fill(_peakHistory, -60.0);
         Array.Fill(_loudnessHistory, -60.0);
     }
@@ -117,29 +107,37 @@ public sealed class AudioAnalysisEngine
 
         // Feed circular buffers and execute FFT every 50ms (matching MusicScope SystemController.java & SpectrumModule.java)
         int frameCount = interleavedSamples.Length / _channelCount;
-        for (int i = 0; i < frameCount; i++)
+        int frameOffset = 0;
+        while (frameOffset < frameCount)
         {
-            int sampleIdx = i * _channelCount;
-            float left = interleavedSamples[sampleIdx];
-            _logSpectrum.Process(interleavedSamples.Slice(sampleIdx, _channelCount), _channelCount);
-            float right = _channelCount >= 2 ? interleavedSamples[sampleIdx + 1] : left;
+            int remaining = frameCount - frameOffset;
+            int toStride = _fftStride - _framesSinceLastFft;
+            int step = toStride > 0 ? Math.Min(remaining, toStride) : 1;
 
-            // SpectrumModule.java caps each 50 ms block to its first FFT-sized window.
-            // At 96 kHz this retains frames 0..2047, rather than replacing them with
-            // frames 2752..4799, which produces different transient peak holds.
             if (_framesSinceLastFft < FftSize)
             {
-                _ringBufferLeft[_ringBufferPos] = left;
-                _ringBufferRight[_ringBufferPos] = right;
-                _ringBufferPos = (_ringBufferPos + 1) % FftSize;
-                _bufferedFrames++;
+                int ringFill = Math.Min(step, FftSize - _framesSinceLastFft);
+                for (int i = 0; i < ringFill; i++)
+                {
+                    int sampleIdx = (frameOffset + i) * _channelCount;
+                    float left = interleavedSamples[sampleIdx];
+                    float right = _channelCount >= 2 ? interleavedSamples[sampleIdx + 1] : left;
+                    _ringBufferLeft[_ringBufferPos] = left;
+                    _ringBufferRight[_ringBufferPos] = right;
+                    if (++_ringBufferPos >= FftSize) _ringBufferPos = 0;
+                }
+                _bufferedFrames += ringFill;
             }
-            _framesSinceLastFft++;
+
+            _logSpectrum.Process(interleavedSamples.Slice(frameOffset * _channelCount, step * _channelCount), _channelCount);
+            _framesSinceLastFft += step;
 
             if (_bufferedFrames >= FftSize && _framesSinceLastFft >= _fftStride)
             {
-                ExecuteFft(_processedFrames + i);
+                ExecuteFft(_processedFrames + frameOffset + step - 1);
             }
+
+            frameOffset += step;
         }
 
         // Update polar history dial (512 radial bins)
@@ -153,12 +151,7 @@ public sealed class AudioAnalysisEngine
                 int sampleCount = count * _channelCount;
 
                 ReadOnlySpan<float> slice = interleavedSamples.Slice(sampleOffset, sampleCount);
-                float maxSample = 0f;
-                for (int s = 0; s < slice.Length; s++)
-                {
-                    float v = Math.Abs(slice[s]);
-                    if (v > maxSample) maxSample = v;
-                }
+                float maxSample = MaxMagnitude(slice);
                 double slicePeakDb = maxSample > 1e-6f ? 20.0 * Math.Log10(maxSample) : -100.0;
                 double currentPeakDb = Math.Max(slicePeakDb, Math.Max(_truePeakMeter.CurrentBlockPeakLeftDb, _truePeakMeter.CurrentBlockPeakRightDb));
                 double currentLoudnessDb = _loudnessMeter.CurrentShortTermLufs;
@@ -197,11 +190,21 @@ public sealed class AudioAnalysisEngine
     /// </summary>
     public AudioRealtimeSnapshot GetRealtimeSnapshot(double progress = 0.0)
     {
-        double[] spectrumCopy = new double[FftSize / 2];
-        Array.Copy(_latestInstantSpectrumDb, spectrumCopy, spectrumCopy.Length);
-
-        double[] peakHoldCopy = new double[FftSize / 2];
-        Array.Copy(_peakHoldSpectrumDb, peakHoldCopy, peakHoldCopy.Length);
+        SpectrumFrame linearFrame = _linearSpectrum.Capture();
+        double[] spectrumCopy;
+        double[] peakHoldCopy;
+        if (_spectrumFftCount > 0)
+        {
+            spectrumCopy = linearFrame.InstantDb;
+            peakHoldCopy = linearFrame.PeakDb;
+        }
+        else
+        {
+            spectrumCopy = new double[FftSize / 2];
+            peakHoldCopy = new double[FftSize / 2];
+            Array.Fill(spectrumCopy, -140.0);
+            Array.Fill(peakHoldCopy, -140.0);
+        }
 
         float[] gonioX = new float[_goniometerX.Length];
         float[] gonioY = new float[_goniometerY.Length];
@@ -242,7 +245,7 @@ public sealed class AudioAnalysisEngine
             Correlation = _stereoAnalyzer.RealtimeCorrelation,
             InstantSpectrumDb = spectrumCopy,
             CumulativePeakSpectrumDb = peakHoldCopy,
-            LinearSpectrum = _linearSpectrum.Capture(),
+            LinearSpectrum = linearFrame,
             LogSpectrum = _logSpectrum.Capture(),
             PeakHistory = peakHistoryCopy,
             LoudnessHistory = loudnessHistoryCopy,
@@ -262,28 +265,9 @@ public sealed class AudioAnalysisEngine
     {
         _framesSinceLastFft = 0;
 
-        int n3 = _ringBufferPos;
-        bool equalChannels = true;
-        for (int n = 0; n < FftSize; n++)
-        {
-            _fftRealBufferLeft[n] = _fftWindow[n] * _ringBufferLeft[n3];
-            _fftImagBufferLeft[n] = 0.0;
-            _fftRealBufferRight[n] = _fftWindow[n] * _ringBufferRight[n3];
-            _fftImagBufferRight[n] = 0.0;
-            equalChannels &= _fftRealBufferLeft[n] == _fftRealBufferRight[n];
-            if (++n3 >= FftSize) n3 = 0;
-        }
-
-        _fft.Forward(_fftRealBufferLeft, _fftImagBufferLeft);
-        if (equalChannels)
-        {
-            _fftRealBufferLeft.AsSpan().CopyTo(_fftRealBufferRight);
-            _fftImagBufferLeft.AsSpan().CopyTo(_fftImagBufferRight);
-        }
-        else _fft.Forward(_fftRealBufferRight, _fftImagBufferRight);
         // The reference fills its ring on the first interval and starts smoothing on the next.
         if (_spectrumFftCount > 0)
-            _linearSpectrum.Update(_fftRealBufferLeft, _fftImagBufferLeft, _fftRealBufferRight, _fftImagBufferRight);
+            _linearSpectrum.ProcessRingWindow(_ringBufferLeft, _ringBufferRight, _ringBufferPos);
 
         // Determine row in 250-row spectrogram
         // matching MusicScope WaterfallControl.java lines 344-350
@@ -297,12 +281,8 @@ public sealed class AudioAnalysisEngine
 
         for (int b = 0; b < FftSize / 2; b++)
         {
-            double magnitude = _linearSpectrum.GetMagnitude(b);
-            _latestInstantSpectrumDb[b] = 20.0 * Math.Log10(magnitude);
-            _peakHoldSpectrumDb[b] = 20.0 * Math.Log10(_linearSpectrum.GetPeakMagnitude(b));
-
             // Accumulate linear magnitude into 2D spectrogram buffers (250 rows x 1024 cols).
-            float linMag = (float)magnitude;
+            float linMag = (float)_linearSpectrum.GetMagnitude(b);
             int idx = rowOffset + b;
             if (isFirstInRow)
             {
@@ -357,8 +337,17 @@ public sealed class AudioAnalysisEngine
         var stereoResult = _channelCount >= 2 ? _stereoAnalyzer.CalculateResult() : new StereoResult();
 
         // MusicScope displays the full cumulative peak hold spectrum across the entire track
-        double[] finalSpectrumDb = new double[FftSize / 2];
-        Array.Copy(_peakHoldSpectrumDb, finalSpectrumDb, finalSpectrumDb.Length);
+        SpectrumFrame linearFrame = _linearSpectrum.Capture();
+        double[] finalSpectrumDb;
+        if (_spectrumFftCount > 0)
+        {
+            finalSpectrumDb = linearFrame.PeakDb;
+        }
+        else
+        {
+            finalSpectrumDb = new double[FftSize / 2];
+            Array.Fill(finalSpectrumDb, -140.0);
+        }
 
         // Ensure trailing bins up to 511 are populated if decoding finished slightly early
         if (_totalFrames > 0 && _processedFrames > 0)
@@ -390,7 +379,7 @@ public sealed class AudioAnalysisEngine
             Levels = levelsResult,
             Stereo = stereoResult,
             SpectrumMagnitudesDb = finalSpectrumDb,
-            LinearSpectrum = _linearSpectrum.Capture(),
+            LinearSpectrum = linearFrame,
             LogSpectrum = _logSpectrum.Capture(),
             PeakHistory = finalPeakHistory,
             LoudnessHistory = finalLoudnessHistory,
@@ -419,8 +408,6 @@ public sealed class AudioAnalysisEngine
         _ringBufferPos = 0;
         Array.Clear(_ringBufferLeft, 0, _ringBufferLeft.Length);
         Array.Clear(_ringBufferRight, 0, _ringBufferRight.Length);
-        Array.Fill(_peakHoldSpectrumDb, -140.0);
-        Array.Fill(_latestInstantSpectrumDb, -140.0);
         Array.Fill(_peakHistory, -60.0);
         Array.Fill(_loudnessHistory, -60.0);
         Array.Clear(_spectrogramMax, 0, _spectrogramMax.Length);
@@ -432,5 +419,33 @@ public sealed class AudioAnalysisEngine
         Array.Clear(_spectrogramRowCount, 0, _spectrogramRowCount.Length);
         _processedFrames = 0;
         _spectrumFftCount = 0;
+    }
+
+    private static float MaxMagnitude(ReadOnlySpan<float> samples)
+    {
+        int i = 0;
+        float max = 0f;
+        if (Vector256.IsHardwareAccelerated && samples.Length >= 8)
+        {
+            ref float p = ref MemoryMarshal.GetReference(samples);
+            var vMax = Vector256<float>.Zero;
+            int vecEnd = samples.Length - (samples.Length & 7);
+            for (; i < vecEnd; i += 8)
+            {
+                var v = Vector256.Abs(Vector256.LoadUnsafe(ref p, (nuint)i));
+                vMax = Vector256.Max(vMax, v);
+            }
+            for (int lane = 0; lane < 8; lane++)
+            {
+                float val = vMax.GetElement(lane);
+                if (val > max) max = val;
+            }
+        }
+        for (; i < samples.Length; i++)
+        {
+            float v = MathF.Abs(samples[i]);
+            if (v > max) max = v;
+        }
+        return max;
     }
 }

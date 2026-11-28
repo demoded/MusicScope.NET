@@ -80,7 +80,13 @@ public static class DsfReader
         AudioChunkDecodedHandler onChunkDecoded,
         CancellationToken ct = default)
     {
-        await using var fs = new FileStream(filePath, FileMode.Open, FileAccess.Read, FileShare.Read, 65536, useAsync: true);
+        await using var fs = new FileStream(
+            filePath,
+            FileMode.Open,
+            FileAccess.Read,
+            FileShare.Read,
+            bufferSize: 262144,
+            FileOptions.Asynchronous | FileOptions.SequentialScan);
 
         // 1. Read 'DSD ' chunk (28 bytes)
         byte[] dsdHeader = new byte[28];
@@ -124,68 +130,168 @@ public static class DsfReader
             decimators[ch] = new DsdChannelDecimator(dsdSampleRate, DsdBitOrder.LsbFirst);
         }
 
-        // Buffer for reading 1 multi-channel block (blockSize bytes per channel)
+        // Batch multiple DSF blocks per chunk (~65,536 bytes per channel) to amortize async I/O and parallelize channels
+        int blocksPerChunk = Math.Max(1, 65536 / blockSize);
+        int maxBytesPerChannel = blocksPerChunk * blockSize;
         int blockBytesTotal = blockSize * channelCount;
-        byte[] blockBuffer = new byte[blockBytesTotal];
+        int chunkBytesTotal = blocksPerChunk * blockBytesTotal;
+        byte[] chunkBuffer = System.Buffers.ArrayPool<byte>.Shared.Rent(chunkBytesTotal);
 
-        // Per-channel and interleaved output float buffers
-        int maxSamplesPerChannel = blockSize + 64;
+        byte[][] channelBytes = new byte[channelCount][];
         float[][] channelOutputs = new float[channelCount][];
+        int maxSamplesPerChannel = maxBytesPerChannel + 64;
         for (int ch = 0; ch < channelCount; ch++)
+        {
+            channelBytes[ch] = new byte[maxBytesPerChannel];
             channelOutputs[ch] = new float[maxSamplesPerChannel];
+        }
 
-        float[] interleavedOutput = new float[maxSamplesPerChannel * channelCount];
+        int interleavedCap = maxSamplesPerChannel * channelCount;
+        float[] interleavedA = new float[interleavedCap];
+        float[] interleavedB = new float[interleavedCap];
+        bool useBufferA = true;
+        Task pendingCallback = Task.CompletedTask;
 
         long totalBytesRead = 0;
         long totalChannelBytes = (long)((sampleCount + 7) / 8);
         long targetAudioBytes = Math.Min(audioDataBytes, totalChannelBytes * channelCount);
 
-        while (totalBytesRead < targetAudioBytes)
+        try
         {
-            ct.ThrowIfCancellationRequested();
-
-            int toRead = (int)Math.Min((long)blockBytesTotal, targetAudioBytes - totalBytesRead);
-            int bytesRead = await fs.ReadAsync(blockBuffer.AsMemory(0, toRead), ct);
-            if (bytesRead <= 0)
-                break;
-
-            totalBytesRead += bytesRead;
-
-            // In DSF: each block contains 'blockSize' bytes for channel 0, then 'blockSize' bytes for channel 1, etc.
-            int bytesPerChannelInBlock = bytesRead / channelCount;
-            if (bytesPerChannelInBlock <= 0)
-                continue;
-
-            int samplesWritten = 0;
-            for (int ch = 0; ch < channelCount; ch++)
+            while (totalBytesRead < targetAudioBytes)
             {
-                int offset = ch * bytesPerChannelInBlock;
-                ReadOnlySpan<byte> chSpan = blockBuffer.AsSpan(offset, bytesPerChannelInBlock);
-                samplesWritten = decimators[ch].Process(chSpan, channelOutputs[ch].AsSpan());
-            }
+                ct.ThrowIfCancellationRequested();
 
-            if (samplesWritten > 0)
-            {
-                // Interleave channel samples
-                for (int s = 0; s < samplesWritten; s++)
+                int toRead = (int)Math.Min((long)chunkBytesTotal, targetAudioBytes - totalBytesRead);
+                int bytesRead = await fs.ReadAtLeastAsync(chunkBuffer.AsMemory(0, toRead), toRead, throwOnEndOfStream: false, ct);
+                if (bytesRead <= 0)
+                    break;
+
+                totalBytesRead += bytesRead;
+
+                // In DSF: each block contains 'blockSize' bytes for channel 0, then 'blockSize' bytes for channel 1, etc.
+                int fullBlocks = bytesRead / blockBytesTotal;
+                int bytesPerChannelInChunk = 0;
+                if (fullBlocks > 0)
                 {
-                    int baseIdx = s * channelCount;
-                    for (int ch = 0; ch < channelCount; ch++)
+                    if (fullBlocks == 1 && bytesRead == blockBytesTotal)
                     {
-                        interleavedOutput[baseIdx + ch] = channelOutputs[ch][s];
+                        for (int ch = 0; ch < channelCount; ch++)
+                        {
+                            Buffer.BlockCopy(chunkBuffer, ch * blockSize, channelBytes[ch], 0, blockSize);
+                        }
+                        bytesPerChannelInChunk = blockSize;
+                    }
+                    else
+                    {
+                        for (int b = 0; b < fullBlocks; b++)
+                        {
+                            int srcBase = b * blockBytesTotal;
+                            int dstBase = b * blockSize;
+                            for (int ch = 0; ch < channelCount; ch++)
+                            {
+                                Buffer.BlockCopy(chunkBuffer, srcBase + ch * blockSize, channelBytes[ch], dstBase, blockSize);
+                            }
+                        }
+                        bytesPerChannelInChunk = fullBlocks * blockSize;
                     }
                 }
 
-                double progress = targetAudioBytes > 0
-                    ? Math.Min(1.0, (double)totalBytesRead / targetAudioBytes)
-                    : 0.0;
+                int remBytes = bytesRead - fullBlocks * blockBytesTotal;
+                int remPerCh = remBytes / channelCount;
+                if (remPerCh > 0)
+                {
+                    int srcBase = fullBlocks * blockBytesTotal;
+                    for (int ch = 0; ch < channelCount; ch++)
+                    {
+                        Buffer.BlockCopy(chunkBuffer, srcBase + ch * remPerCh, channelBytes[ch], bytesPerChannelInChunk, remPerCh);
+                    }
+                    bytesPerChannelInChunk += remPerCh;
+                }
 
-                await onChunkDecoded(
-                    interleavedOutput.AsMemory(0, samplesWritten * channelCount),
-                    channelCount,
-                    pcmSampleRate,
-                    progress);
+                if (bytesPerChannelInChunk <= 0)
+                    continue;
+
+                int samplesWritten = 0;
+                if (channelCount == 2)
+                {
+                    int chLen = bytesPerChannelInChunk;
+                    Task<int> ch1Task = Task.Run(() => decimators[1].Process(channelBytes[1].AsSpan(0, chLen), channelOutputs[1].AsSpan()));
+                    samplesWritten = decimators[0].Process(channelBytes[0].AsSpan(0, chLen), channelOutputs[0].AsSpan());
+                    await ch1Task;
+                }
+                else
+                {
+                    for (int ch = 0; ch < channelCount; ch++)
+                    {
+                        ReadOnlySpan<byte> chSpan = channelBytes[ch].AsSpan(0, bytesPerChannelInChunk);
+                        samplesWritten = decimators[ch].Process(chSpan, channelOutputs[ch].AsSpan());
+                    }
+                }
+
+                if (samplesWritten > 0)
+                {
+                    float[] currentOut = useBufferA ? interleavedA : interleavedB;
+                    useBufferA = !useBufferA;
+
+                    if (channelCount == 2)
+                    {
+                        InterleaveStereoFloats(channelOutputs[0], channelOutputs[1], currentOut, samplesWritten);
+                    }
+                    else
+                    {
+                        for (int s = 0; s < samplesWritten; s++)
+                        {
+                            int baseIdx = s * channelCount;
+                            for (int ch = 0; ch < channelCount; ch++)
+                            {
+                                currentOut[baseIdx + ch] = channelOutputs[ch][s];
+                            }
+                        }
+                    }
+
+                    double progress = targetAudioBytes > 0
+                        ? Math.Min(1.0, (double)totalBytesRead / targetAudioBytes)
+                        : 0.0;
+
+                    await pendingCallback;
+                    int sampleCountOut = samplesWritten * channelCount;
+                    pendingCallback = Task.Run(
+                        () => onChunkDecoded(currentOut.AsMemory(0, sampleCountOut), channelCount, pcmSampleRate, progress),
+                        ct);
+                }
             }
+
+            await pendingCallback;
+        }
+        finally
+        {
+            try { await pendingCallback; } catch { }
+            System.Buffers.ArrayPool<byte>.Shared.Return(chunkBuffer);
+        }
+    }
+
+    private static void InterleaveStereoFloats(ReadOnlySpan<float> left, ReadOnlySpan<float> right, Span<float> interleaved, int samples)
+    {
+        int s = 0;
+        int unrolledEnd = samples - (samples & 3);
+        for (; s < unrolledEnd; s += 4)
+        {
+            int idx = s << 1;
+            interleaved[idx] = left[s];
+            interleaved[idx + 1] = right[s];
+            interleaved[idx + 2] = left[s + 1];
+            interleaved[idx + 3] = right[s + 1];
+            interleaved[idx + 4] = left[s + 2];
+            interleaved[idx + 5] = right[s + 2];
+            interleaved[idx + 6] = left[s + 3];
+            interleaved[idx + 7] = right[s + 3];
+        }
+        for (; s < samples; s++)
+        {
+            int idx = s << 1;
+            interleaved[idx] = left[s];
+            interleaved[idx + 1] = right[s];
         }
     }
 }

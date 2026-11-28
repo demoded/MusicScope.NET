@@ -55,4 +55,17 @@ public sealed class UniversalAudioDecoder : IAudioDecoder
 
         return _ffmpegDecoder.DecodeAsync(filePath, onChunkDecoded, ct);
     }
+
+    public Task DecodeAsync(
+        AudioFileInfo probedInfo,
+        AudioChunkDecodedHandler onChunkDecoded,
+        CancellationToken ct = default)
+    {
+        if (probedInfo.IsDsd || IsDsd(probedInfo.FilePath))
+        {
+            return _dsdDecoder.DecodeAsync(probedInfo.FilePath, onChunkDecoded, ct);
+        }
+
+        return _ffmpegDecoder.DecodeAsync(probedInfo, onChunkDecoded, ct);
+    }
 }
