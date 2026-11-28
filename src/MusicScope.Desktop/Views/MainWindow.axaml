@@ -46,6 +46,12 @@
                             <TextBlock Text="💾 Export Report" FontSize="12"/>
                         </StackPanel>
                     </Button>
+                    <ToggleButton Name="FftModeToggleBtn"
+                                  IsChecked="{Binding IsOverlappingSpectrum}"
+                                  Content="{Binding SpectrumModeLabel}"
+                                  Background="#161B22" Foreground="#7EE787"
+                                  Padding="10,5" CornerRadius="4" FontSize="12"
+                                  ToolTip.Tip="Overlap 8K: continuous 8,192-frame overlapping FFT (finer resolution, captures all transients). Classic 2K: original XiVero 2,048-frame first-window sampling."/>
                 </StackPanel>
 
                 <!-- Track info & DAW status -->

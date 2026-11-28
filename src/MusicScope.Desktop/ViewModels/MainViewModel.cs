@@ -45,6 +45,15 @@ public partial class MainViewModel : ViewModelBase
     [ObservableProperty]
     private bool _isLogarithmic;
 
+    [ObservableProperty]
+    [NotifyPropertyChangedFor(nameof(SpectrumModeLabel))]
+    private bool _isOverlappingSpectrum = true;
+
+    public string SpectrumModeLabel => IsOverlappingSpectrum ? "FFT: Overlap 8K" : "FFT: Classic 2K";
+
+    public SpectrumAnalysisMode SelectedAnalysisMode =>
+        IsOverlappingSpectrum ? SpectrumAnalysisMode.Overlapping : SpectrumAnalysisMode.Original;
+
     // MusicScope Format Matrix
     [ObservableProperty]
     private string _formatName = "FLAC";
@@ -249,10 +258,11 @@ public partial class MainViewModel : ViewModelBase
 
         _dawServer.AudioDataReceived += (s, e) =>
         {
-            if (_liveEngine == null || Math.Abs(SampleRate - e.SampleRate) > 1.0)
+            var mode = SelectedAnalysisMode;
+            if (_liveEngine == null || Math.Abs(SampleRate - e.SampleRate) > 1.0 || _liveEngine.AnalysisMode != mode)
             {
                 SampleRate = e.SampleRate;
-                _liveEngine = new AudioAnalysisEngine(e.SampleRate, 2);
+                _liveEngine = new AudioAnalysisEngine(e.SampleRate, 2, analysisMode: mode);
             }
 
             int floatCount = e.AudioBytes.Length / sizeof(float);
@@ -320,7 +330,7 @@ public partial class MainViewModel : ViewModelBase
                     info.FormatName.Contains("DSF", StringComparison.OrdinalIgnoreCase) ||
                     info.FormatName.Contains("DFF", StringComparison.OrdinalIgnoreCase);
 
-            var engine = new AudioAnalysisEngine(info.SampleRate, info.ChannelCount, info.TotalFrames);
+            var engine = new AudioAnalysisEngine(info.SampleRate, info.ChannelCount, info.TotalFrames, SelectedAnalysisMode);
 
             var sw = System.Diagnostics.Stopwatch.StartNew();
             long lastUiUpdateMs = 0;

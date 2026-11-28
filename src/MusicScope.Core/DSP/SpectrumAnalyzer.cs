@@ -31,8 +31,10 @@ internal sealed class SpectrumAnalyzer
 
     private readonly int _size;
     private readonly int _stride;
+    private readonly bool _continuousCoverage;
     private readonly FastFourierTransform _fft;
     private readonly double[] _window;
+    private readonly double _windowSum;
     private readonly double[] _packedReal, _packedImag, _twiddleCos, _twiddleSin;
     private readonly double[] _ringLeft, _ringRight, _realLeft, _imagLeft, _realRight, _imagRight;
     private readonly double[] _combined, _peak, _left, _right, _panorama, _phase;
@@ -40,10 +42,20 @@ internal sealed class SpectrumAnalyzer
     private int _position, _buffered, _sinceFft;
     private bool _hasChannelDifference;
 
-    public SpectrumAnalyzer(int size, double sampleRate)
+    public int Size => _size;
+    public int Stride => _stride;
+    public int ExecutionCount { get; private set; }
+
+    public int FramesUntilNextExecute => _buffered < _size
+        ? _size - _buffered
+        : Math.Max(1, _stride - _sinceFft);
+
+    public SpectrumAnalyzer(int size, double sampleRate, bool continuousCoverage = false, int? customStride = null)
     {
         _size = size;
-        _stride = Math.Max(1, (int)(sampleRate * 0.050));
+        _continuousCoverage = continuousCoverage;
+        int stride50Ms = Math.Max(1, (int)(sampleRate * 0.050));
+        _stride = customStride ?? (continuousCoverage && stride50Ms > size ? Math.Max(1, size / 2) : stride50Ms);
         // Pack even/odd real samples into a half-size complex FFT.
         _fft = new(size / 2);
         _packedReal = new double[size / 2];
@@ -56,6 +68,9 @@ internal sealed class SpectrumAnalyzer
             _twiddleSin[i] = Math.Sin(-2 * Math.PI * i / size);
         }
         _window = WindowFunctions.Create(WindowType.BlackmanHarris, size);
+        double windowSum = 0.0;
+        for (int i = 0; i < _window.Length; i++) windowSum += _window[i];
+        _windowSum = windowSum;
         _ringLeft = new double[size]; _ringRight = new double[size];
         _realLeft = new double[size]; _imagLeft = new double[size];
         _realRight = new double[size]; _imagRight = new double[size];
@@ -74,7 +89,10 @@ internal sealed class SpectrumAnalyzer
         int offset = 0;
         while (offset < frames)
         {
-            int count = Math.Min(frames - offset, Math.Min(_size - _position, _stride - _sinceFft));
+            int limit = _continuousCoverage && _buffered < _size
+                ? _size - _buffered
+                : _stride - _sinceFft;
+            int count = Math.Min(frames - offset, Math.Min(_size - _position, Math.Max(1, limit)));
             for (int i = 0; i < count; i++)
             {
                 int source = (offset + i) * channels;
@@ -83,20 +101,105 @@ internal sealed class SpectrumAnalyzer
             }
             _position += count;
             if (_position == _size) _position = 0;
+            bool wasWarmingUp = _buffered < _size;
             _buffered = Math.Min(_size, _buffered + count);
-            _sinceFft += count;
             offset += count;
-            if (_sinceFft == _stride)
+
+            if (_continuousCoverage)
             {
-                _sinceFft = 0;
-                if (_buffered == _size) Execute();
+                if (_buffered == _size)
+                {
+                    if (wasWarmingUp)
+                    {
+                        // First full window at startup (covers frames 0.._size-1)
+                        _sinceFft = 0;
+                        Execute();
+                    }
+                    else
+                    {
+                        _sinceFft += count;
+                        if (_sinceFft >= _stride)
+                        {
+                            _sinceFft = 0;
+                            Execute();
+                        }
+                    }
+                }
+            }
+            else
+            {
+                _sinceFft += count;
+                if (_sinceFft == _stride)
+                {
+                    _sinceFft = 0;
+                    if (_buffered == _size) Execute();
+                }
             }
         }
     }
 
-    public void Finish()
+    public bool Finish()
     {
-        if (_buffered == _size && _sinceFft > 0) Execute();
+        if (_buffered == _size && _sinceFft > 0)
+        {
+            _sinceFft = 0;
+            Execute();
+            return true;
+        }
+
+        if (_continuousCoverage && _buffered > 0 && _buffered < _size)
+        {
+            ExecuteShort(_buffered);
+            _sinceFft = 0;
+            return true;
+        }
+
+        return false;
+    }
+
+    private void ExecuteShort(int count)
+    {
+        double targetWindowSum = _windowSum;
+        if (count >= 16)
+        {
+            double[] shortWindow = WindowFunctions.Create(WindowType.BlackmanHarris, count);
+            double shortSum = 0.0;
+            for (int i = 0; i < count; i++) shortSum += shortWindow[i];
+            double scale = shortSum > 0.0 ? targetWindowSum / shortSum : (double)_size / count;
+            for (int i = 0; i < count; i++)
+            {
+                double w = shortWindow[i] * scale;
+                _realLeft[i] = _ringLeft[i] * w;
+                _realRight[i] = _ringRight[i] * w;
+            }
+        }
+        else
+        {
+            double scale = count > 0 ? (double)_size / count : 1.0;
+            for (int i = 0; i < count; i++)
+            {
+                _realLeft[i] = _ringLeft[i] * scale;
+                _realRight[i] = _ringRight[i] * scale;
+            }
+        }
+
+        Array.Clear(_realLeft, count, _size - count);
+        Array.Clear(_realRight, count, _size - count);
+
+        bool equalChannels = _ringLeft.AsSpan(0, count).SequenceEqual(_ringRight.AsSpan(0, count));
+        TransformReal(_realLeft, _imagLeft);
+        if (equalChannels)
+        {
+            int bins = _size / 2;
+            _realLeft.AsSpan(0, bins).CopyTo(_realRight);
+            _imagLeft.AsSpan(0, bins).CopyTo(_imagRight);
+        }
+        else
+        {
+            TransformReal(_realRight, _imagRight);
+        }
+        Update(_realLeft, _imagLeft, _realRight, _imagRight, seedDirectly: ExecutionCount == 0);
+        ExecutionCount++;
     }
 
     [MethodImpl(MethodImplOptions.AggressiveOptimization)]
@@ -104,6 +207,7 @@ internal sealed class SpectrumAnalyzer
     {
         _sinceFft = 0;
         ProcessRingWindow(_ringLeft, _ringRight, _position);
+        ExecutionCount++;
     }
 
     [MethodImpl(MethodImplOptions.AggressiveOptimization)]
@@ -204,7 +308,7 @@ internal sealed class SpectrumAnalyzer
 
     [MethodImpl(MethodImplOptions.AggressiveOptimization)]
     public void Update(ReadOnlySpan<double> realLeft, ReadOnlySpan<double> imagLeft,
-        ReadOnlySpan<double> realRight, ReadOnlySpan<double> imagRight)
+        ReadOnlySpan<double> realRight, ReadOnlySpan<double> imagRight, bool seedDirectly = false)
     {
         double normalization = 8.0 / _size;
         double[] leftArr = _left;
@@ -216,6 +320,32 @@ internal sealed class SpectrumAnalyzer
         History3[] phaseHist = _phaseHistory;
         History3[] panHist = _panHistory;
         int len = combinedArr.Length;
+
+        if (seedDirectly)
+        {
+            for (int i = 0; i < len; i++)
+            {
+                double rL = realLeft[i], iL = imagLeft[i];
+                double rR = realRight[i], iR = imagRight[i];
+                if (rL != rR || iL != iR) _hasChannelDifference = true;
+                double l = Math.Sqrt(rL * rL + iL * iL) * normalization;
+                double r = Math.Sqrt(rR * rR + iR * iR) * normalization;
+                double newL = Math.Max(1e-10, l);
+                double newR = Math.Max(1e-10, r);
+                double newC = Math.Max(1e-10, (l + r) * 0.5);
+                leftArr[i] = newL;
+                rightArr[i] = newR;
+                combinedArr[i] = newC;
+                if (newC > peakArr[i]) peakArr[i] = newC;
+
+                double phase = (l > 1e-10 && r > 1e-10)
+                    ? Math.Abs(Math.Atan2(iL * rR - rL * iR, rL * rR + iL * iR))
+                    : 0.0;
+                phaseArr[i] = Smooth(phase, ref phaseHist[i]);
+                panArr[i] = Smooth(newR - newL, ref panHist[i]);
+            }
+            return;
+        }
 
         int b = 0;
         if (!_hasChannelDifference)
@@ -363,6 +493,7 @@ internal sealed class SpectrumAnalyzer
     public void Reset()
     {
         _position = _buffered = _sinceFft = 0;
+        ExecutionCount = 0;
         _hasChannelDifference = false;
         Array.Clear(_ringLeft); Array.Clear(_ringRight);
         foreach (var values in new[] { _combined, _peak, _left, _right }) Array.Fill(values, 1e-10);
