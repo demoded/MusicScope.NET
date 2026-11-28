@@ -36,6 +36,22 @@
                             <TextBlock Text="📁 Open Audio File" FontSize="12"/>
                         </StackPanel>
                     </Button>
+                    <Button Name="StartMeasurementBtn"
+                            Click="OnStartMeasurementClick"
+                            Background="#161B22"
+                            Foreground="#F0F6FC"
+                            Padding="10,5"
+                            CornerRadius="4"
+                            ToolTip.Tip="Start measurement on the current audio file (or open a file if none is loaded)">
+                        <StackPanel Orientation="Horizontal" Spacing="6" VerticalAlignment="Center">
+                            <Image Name="StartMeasurementIcon"
+                                   Source="avares://MusicScope.Desktop/Assets/research.png"
+                                   Width="16"
+                                   Height="16"
+                                   VerticalAlignment="Center"/>
+                            <TextBlock Text="Measure" FontSize="12" VerticalAlignment="Center"/>
+                        </StackPanel>
+                    </Button>
                     <Button Command="{Binding ToggleDawServerCommand}" Background="#161B22" Foreground="#F0F6FC" Padding="10,5" CornerRadius="4">
                         <StackPanel Orientation="Horizontal" Spacing="6">
                             <TextBlock Text="🔌 DAW Server" FontSize="12"/>

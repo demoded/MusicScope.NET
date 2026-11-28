@@ -1,5 +1,6 @@
 using System;
 using System.IO;
+using System.Threading.Tasks;
 using Avalonia.Controls;
 using Avalonia.Interactivity;
 using Avalonia.Platform.Storage;
@@ -15,6 +16,22 @@ public partial class MainWindow : Window
     }
 
     private async void OnOpenFileClick(object? sender, RoutedEventArgs e)
+    {
+        await OpenAndAnalyzeFileAsync();
+    }
+
+    private async void OnStartMeasurementClick(object? sender, RoutedEventArgs e)
+    {
+        if (DataContext is MainViewModel vm && !string.IsNullOrWhiteSpace(vm.FilePath) && File.Exists(vm.FilePath))
+        {
+            await vm.AnalyzeFileCommand.ExecuteAsync(vm.FilePath);
+            return;
+        }
+
+        await OpenAndAnalyzeFileAsync();
+    }
+
+    private async Task OpenAndAnalyzeFileAsync()
     {
         var topLevel = GetTopLevel(this);
         if (topLevel == null) return;
